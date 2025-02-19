@@ -327,7 +327,7 @@ class Wifyte:
         deauth_cmd1 = [
             "aireplay-ng",
             "--deauth",
-            "20",  # Lebih banyak paket deauth
+            "60",  # Lebih banyak paket deauth
             "-a",
             network.bssid,
             self.monitor_interface,
