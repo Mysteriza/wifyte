@@ -11,7 +11,7 @@ init(autoreset=True)
 WORDLIST = "wifyte.txt"  # Path to the wordlist file
 TIMEOUT = 180  # Timeout for capturing handshake (3 minutes)
 SCAN_DURATION = 12  # Total scanning duration in seconds
-SCAN_INTERVAL = 3  # Interval between scans in seconds
+SCAN_INTERVAL = 4  # Interval between scans in seconds
 
 
 def detect_wifi_adapter():
@@ -36,6 +36,8 @@ def detect_wifi_adapter():
 def enable_monitor_mode(interface):
     print(Fore.CYAN + f"[+] Enabling monitor mode on {interface}...")
     try:
+        # Kill processes that might interfere with airmon-ng
+        subprocess.run(["airmon-ng", "check", "kill"], check=True)
         subprocess.run(["airmon-ng", "start", interface], check=True)
         return f"{interface}mon"
     except Exception as e:
@@ -80,13 +82,16 @@ def scan_networks(interface):
                 if "BSSID" in line:
                     # Find column indices
                     headers = line.split()
-                    bssid_index = headers.index("BSSID")
-                    ssid_index = headers.index("ESSID")
-                    channel_index = headers.index("CH")
-                    signal_index = headers.index("PWR")
-                    clients_index = (
-                        headers.index("STATION") if "STATION" in headers else None
-                    )
+                    try:
+                        bssid_index = headers.index("BSSID")
+                        ssid_index = headers.index("ESSID")
+                        channel_index = headers.index("CH")
+                        signal_index = headers.index("PWR")
+                        clients_index = (
+                            headers.index("STATION") if "STATION" in headers else None
+                        )
+                    except ValueError:
+                        continue
                     continue
 
                 if len(line.strip()) > 0 and "Station" not in line:
