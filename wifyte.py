@@ -439,7 +439,7 @@ class Wifyte:
         watcher_thread.start()
 
         # Strategi deauth yang lebih agresif
-        max_attempts = 5  # Lebih banyak percobaan
+        max_attempts = 12  # Lebih banyak percobaan
         attempt = 0
 
         try:
