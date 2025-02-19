@@ -11,7 +11,7 @@ Telegram: [Mysteriza](https://t.me/Mysteriza)
 ## Screenshot
 ![Screenshot 2025-02-19 194710](https://github.com/user-attachments/assets/924221d5-9e2d-4a41-85f5-eec9705f5e1f)
 
-
+BTW You need TP-Link TL-WN722N V1 WiFi Adapter to run this program for using Monitor Mode.
 ## Disclaimer
 This tool is intended solely for educational and ethical purposes. It has been developed to help users understand Wi-Fi security vulnerabilities and improve network protection.
 
