@@ -456,7 +456,7 @@ class Wifyte:
                         [
                             "aireplay-ng",
                             "--deauth",
-                            "15",
+                            "30",
                             "-a",
                             network.bssid,
                             self.monitor_interface,
@@ -479,7 +479,7 @@ class Wifyte:
                             [
                                 "aireplay-ng",
                                 "--deauth",
-                                "25",
+                                "60",
                                 "-a",
                                 network.bssid,
                                 self.monitor_interface,
