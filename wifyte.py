@@ -45,14 +45,14 @@ def scan_networks(monitor_interface):
     if os.path.exists(scan_file):
         os.remove(scan_file)
 
-    # Jalankan airodump-ng selama beberapa detik
+    # Jalankan airodump-ng selama 10 detik
     process = subprocess.Popen(
         f"sudo airodump-ng --output-format csv -w scan_result {monitor_interface}",
         shell=True,
     )
     print("Scanning... Please wait for 10 seconds.")
     time.sleep(10)  # Biarkan pemindaian berjalan selama 10 detik
-    process.terminate()
+    process.terminate()  # Hentikan proses airodump-ng
 
     # Periksa apakah file CSV dihasilkan
     if not os.path.exists(scan_file):
@@ -129,7 +129,7 @@ def capture_handshake(monitor_interface, target):
             time.sleep(1)
 
 
-def crack_password(capture_file):
+def crack_password(capture_file, target):
     """Attempt to crack the password using the provided wordlist."""
     wordlist = "wifyte.txt"
     if not os.path.exists(wordlist):
@@ -173,7 +173,7 @@ if __name__ == "__main__":
     networks = scan_networks(monitor_interface)
     target = select_target(networks)
     capture_file = capture_handshake(monitor_interface, target)
-    password = crack_password(capture_file)
+    password = crack_password(capture_file, target)
 
     cleanup = input("\nDo you want to disable monitor mode? (y/n): ").lower()
     if cleanup == "y":
