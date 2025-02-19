@@ -77,34 +77,35 @@ class Wifyte:
         self.cleanup()
 
     def execute_command(
-        self, command: list, shell=False
-    ) -> Optional[subprocess.CompletedProcess]:
-        """Run a shell command with error handling."""
+        self, command, shell=False, capture_output=True, text=True
+    ) -> subprocess.CompletedProcess:
+        """Menjalankan shell command dengan error handling"""
         try:
             result = subprocess.run(
-                command, shell=shell, capture_output=True, text=True
+                command, shell=shell, capture_output=capture_output, text=text
             )
-            if result.returncode != 0:
-                print(
-                    f"{Colors.RED}[!] Command failed: {' '.join(command)}{Colors.ENDC}"
-                )
             return result
         except Exception as e:
-            print(f"{Colors.RED}[!] Error executing command: {e}{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Error saat menjalankan command: {e}{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Command: {command}{Colors.ENDC}")
             return None
 
     def find_wifi_interfaces(self) -> List[str]:
-        """Find available WiFi interfaces."""
-        result = self.execute_command(["iwconfig"])
+        """Menemukan semua interface wifi yang tersedia"""
+        result = self.execute_command(["iwconfig"], shell=True)
         if not result or result.returncode != 0:
-            print(f"{Colors.RED}[!] Failed to list WiFi interfaces{Colors.ENDC}")
-            return []
+            print(
+                f"{Colors.RED}[!] Error: Gagal mendapatkan daftar interface wifi{Colors.ENDC}"
+            )
+            sys.exit(1)
 
-        return [
-            line.split()[0]
-            for line in result.stdout.split("\n")
-            if "IEEE 802.11" in line
-        ]
+        interfaces = []
+        for line in result.stdout.split("\n"):
+            if "IEEE 802.11" in line:
+                interface = line.split()[0]
+                interfaces.append(interface)
+
+        return interfaces
 
     def check_monitor_mode(self, interface) -> bool:
         """Memeriksa apakah interface dalam mode monitor"""
@@ -114,27 +115,46 @@ class Wifyte:
 
         return "Mode:Monitor" in result.stdout
 
-    def enable_monitor_mode(self, interface: str) -> Optional[str]:
-        """Enable monitor mode on the given interface."""
+    def enable_monitor_mode(self, interface) -> Optional[str]:
+        """Mengaktifkan mode monitor pada interface"""
+        # Matikan proses yang mungkin mengganggu
         self.execute_command(["airmon-ng", "check", "kill"])
+
+        # Matikan interface
         self.execute_command(["ifconfig", interface, "down"])
 
+        # Ubah ke mode monitor
         result = self.execute_command(["airmon-ng", "start", interface])
         if not result or result.returncode != 0:
             print(
-                f"{Colors.RED}[!] Failed to enable monitor mode on {interface}{Colors.ENDC}"
+                f"{Colors.RED}[!] Error: Gagal mengaktifkan mode monitor pada {interface}{Colors.ENDC}"
             )
             return None
 
-        # Extract monitor interface name
-        match = re.search(r"monitor mode enabled on (\w+)", result.stdout)
-        monitor_iface = match.group(1) if match else f"{interface}mon"
-
-        self.execute_command(["ifconfig", monitor_iface, "up"])
-        print(
-            f"{Colors.GREEN}[+] Monitor mode activated on {monitor_iface}{Colors.ENDC}"
+        # Cari nama interface monitor yang dibuat
+        match = re.search(
+            r"(Created monitor mode interface|monitor mode enabled on) (\w+)",
+            result.stdout,
         )
-        return monitor_iface
+        if match:
+            monitor_interface = match.group(2)
+        else:
+            # Cara alternatif jika format output berbeda
+            interfaces_after = self.find_wifi_interfaces()
+            for iface in interfaces_after:
+                if self.check_monitor_mode(iface):
+                    monitor_interface = iface
+                    break
+            else:
+                monitor_interface = f"{interface}mon"  # Asumsi default airmon-ng
+
+        # Memastikan interface up
+        self.execute_command(["ifconfig", monitor_interface, "up"])
+
+        print(
+            f"{Colors.GREEN}[+] Mode monitor aktif pada interface {monitor_interface}{Colors.ENDC}"
+        )
+        return monitor_interface
 
     def disable_monitor_mode(self, monitor_interface) -> bool:
         """Menonaktifkan mode monitor"""
@@ -188,65 +208,106 @@ class Wifyte:
             sys.exit(1)
 
     def scan_networks(self) -> List[WiFiNetwork]:
-        """Scan for available WiFi networks."""
+        """Melakukan scanning jaringan wifi yang tersedia"""
         if not self.monitor_interface:
-            print(f"{Colors.RED}[!] No monitor interface available{Colors.ENDC}")
+            print(
+                f"{Colors.RED}[!] Error: Tidak ada interface monitor mode{Colors.ENDC}"
+            )
             return []
 
-        output_file = os.path.join(self.temp_dir, "scan-01.csv")
-        scan_cmd = [
-            "airodump-ng",
-            "-w",
-            os.path.join(self.temp_dir, "scan"),
-            "--output-format",
-            "csv",
-            self.monitor_interface,
-        ]
+        print(f"{Colors.BLUE}[*] Memulai scanning jaringan WiFi...{Colors.ENDC}")
+        print(
+            f"{Colors.YELLOW}[!] Tekan Ctrl+C untuk menghentikan scanning{Colors.ENDC}"
+        )
 
+        # File untuk menyimpan hasil scanning
+        output_file = os.path.join(self.temp_dir, "scan-01.csv")
+
+        # Jalankan airodump-ng untuk scanning
         proc = subprocess.Popen(
-            scan_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            [
+                "airodump-ng",
+                "-w",
+                os.path.join(self.temp_dir, "scan"),
+                "--output-format",
+                "csv",
+                self.monitor_interface,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
         try:
-            time.sleep(6)  # Let it scan for 6 seconds
+            # Scan selama 6 detik (lebih cepat dari sebelumnya)
+            for i in range(6):
+                time.sleep(1)
+                print(f"{Colors.BLUE}[*] Scanning... {i+1}/6{Colors.ENDC}", end="\r")
+            print("\n")
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Scanning stopped by user{Colors.ENDC}")
+            print(f"\n{Colors.YELLOW}[!] Scanning dihentikan oleh user{Colors.ENDC}")
         finally:
-            proc.terminate()
+            proc.send_signal(signal.SIGTERM)
             proc.wait()
 
-        if not os.path.exists(output_file):
-            print(f"{Colors.RED}[!] Scan output file missing{Colors.ENDC}")
-            return []
-
         networks = []
-        with open(output_file, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
 
-        data_section = False
-        network_id = 0
+        # Parse hasil scanning dari file CSV
+        try:
+            if os.path.exists(output_file):
+                with open(output_file, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
 
-        for line in lines:
-            line = line.strip()
-            if "BSSID" in line:
-                data_section = True
-                continue
-            if "Station MAC" in line or not data_section:
-                break
+                # Lewati header
+                data_section = False
+                network_id = 0
 
-            parts = [p.strip() for p in line.split(",")]
-            if len(parts) >= 14:
-                network_id += 1
-                networks.append(
-                    WiFiNetwork(
-                        id=network_id,
-                        bssid=parts[0],
-                        power=int(parts[8]) if parts[8].lstrip("-").isdigit() else 0,
-                        channel=int(parts[3]) if parts[3].isdigit() else 0,
-                        encryption=f"{parts[5]} {parts[6]}",
-                        essid=parts[13].replace("\x00", ""),
-                    )
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("BSSID"):
+                        data_section = True
+                        continue
+
+                    if line.startswith("Station MAC"):
+                        break
+
+                    if data_section and line:
+                        parts = [part.strip() for part in line.split(",")]
+                        if len(parts) >= 14:
+                            network_id += 1
+                            bssid = parts[0]
+                            power = (
+                                int(parts[8].strip())
+                                if parts[8].strip()
+                                and parts[8].strip().lstrip("-").isdigit()
+                                else 0
+                            )
+                            channel = (
+                                int(parts[3].strip())
+                                if parts[3].strip() and parts[3].strip().isdigit()
+                                else 0
+                            )
+                            encryption = parts[5].strip() + " " + parts[6].strip()
+                            essid = parts[13].strip().replace("\x00", "")
+
+                            if essid:  # Hanya tambahkan jaringan dengan ESSID
+                                networks.append(
+                                    WiFiNetwork(
+                                        id=network_id,
+                                        bssid=bssid,
+                                        channel=channel,
+                                        power=power,
+                                        essid=essid,
+                                        encryption=encryption,
+                                    )
+                                )
+            else:
+                print(
+                    f"{Colors.RED}[!] Error: File hasil scanning tidak ditemukan{Colors.ENDC}"
                 )
+        except Exception as e:
+            print(
+                f"{Colors.RED}[!] Error saat membaca hasil scanning: {e}{Colors.ENDC}"
+            )
 
         return networks
 
@@ -287,37 +348,51 @@ class Wifyte:
         return True
 
     def check_for_handshake(self, cap_file: str) -> bool:
-        """Check if a handshake is present in the capture file."""
+        """Memeriksa file capture untuk handshake"""
         if not os.path.exists(cap_file):
             return False
 
-        tools = {
-            "aircrack-ng": ["aircrack-ng", cap_file],
-            "cowpatty": ["cowpatty", "-c", "-r", cap_file],
-            "pyrit": ["pyrit", "-r", cap_file, "analyze"],
-        }
+        # Metode 1: Menggunakan aircrack-ng
+        aircrack_result = self.execute_command(["aircrack-ng", cap_file])
+        if aircrack_result and "1 handshake" in aircrack_result.stdout:
+            return True
 
-        for tool, cmd in tools.items():
-            if shutil.which(tool):
-                result = self.execute_command(cmd)
-                if result and (
-                    "1 handshake" in result.stdout or "handshake(s)" in result.stdout
-                ):
-                    return True
+        # Metode 2: Menggunakan cowpatty (jika tersedia) - verifikasi lebih akurat
+        cowpatty_path = shutil.which("cowpatty")
+        if cowpatty_path:
+            cowpatty_result = self.execute_command(["cowpatty", "-c", "-r", cap_file])
+            if (
+                cowpatty_result
+                and "Collected all necessary data to mount crack against WPA"
+                in cowpatty_result.stdout
+            ):
+                return True
+
+        # Metode 3: Menggunakan pyrit (jika tersedia) - verifikasi lebih akurat lagi
+        pyrit_path = shutil.which("pyrit")
+        if pyrit_path:
+            pyrit_result = self.execute_command(["pyrit", "-r", cap_file, "analyze"])
+            if (
+                pyrit_result
+                and "handshake(s)" in pyrit_result.stdout
+                and not "0 handshake(s)" in pyrit_result.stdout
+            ):
+                return True
 
         return False
 
-    def handshake_watcher(self, capture_path: str):
-        """Monitor capture file for handshake."""
+    def handshake_watcher(self, capture_path: str, network: WiFiNetwork):
+        """Thread untuk memantau file capture dan mengecek handshake"""
         cap_file = f"{capture_path}-01.cap"
+        check_interval = 1  # Cek setiap 1 detik
+
         while not self.stop_capture:
             if os.path.exists(cap_file) and self.check_for_handshake(cap_file):
-                print(f"{Colors.GREEN}[+] Handshake captured!{Colors.ENDC}")
+                print(f"{Colors.GREEN}[+] Handshake terdeteksi!{Colors.ENDC}")
                 self.handshake_found = True
                 self.stop_capture = True
                 break
-            time.sleep(1)
-
+            time.sleep(check_interval)
 
     def capture_handshake(self, network: WiFiNetwork) -> Optional[str]:
         """Menangkap handshake dari jaringan target dengan metode yang ditingkatkan"""
