@@ -9,7 +9,7 @@ from colorama import Fore, Style, init
 init(autoreset=True)
 
 # Configuration
-WORDLIST = "wordlist.txt"  # Path to the wordlist file
+WORDLIST = "wifyte.txt"  # Path to the wordlist file
 TIMEOUT = 180  # Timeout for capturing handshake (3 minutes)
 
 # Global flag to stop scanning
