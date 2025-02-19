@@ -9,7 +9,7 @@ from colorama import Fore, Style, init
 init(autoreset=True)
 
 # Configuration
-WORDLIST = "wifyte.txt"  # Path to the wordlist file
+WORDLIST = "wordlist.txt"  # Path to the wordlist file
 TIMEOUT = 180  # Timeout for capturing handshake (3 minutes)
 
 # Global flag to stop scanning
@@ -69,16 +69,44 @@ def scan_networks(interface):
                 output = process.stdout.read()
                 lines = output.split("\n")
                 temp_networks = []
+                bssid_index = None
+                ssid_index = None
+                channel_index = None
+                signal_index = None
+                clients_index = None
+
                 for line in lines:
                     if "BSSID" in line:
-                        break
+                        # Find column indices
+                        headers = line.split()
+                        bssid_index = headers.index("BSSID")
+                        ssid_index = headers.index("ESSID")
+                        channel_index = headers.index("CH")
+                        signal_index = headers.index("PWR")
+                        clients_index = (
+                            headers.index("STATION") if "STATION" in headers else None
+                        )
+                        continue
+
                     if len(line.strip()) > 0 and "Station" not in line:
                         parts = line.split()
-                        bssid = parts[0]
-                        channel = parts[3]
-                        ssid = parts[13] if len(parts) > 13 else "<Hidden>"
-                        signal = int(parts[8])  # Signal strength in dBm
-                        clients = parts[9] if len(parts) > 9 else "0"
+                        if (
+                            len(parts)
+                            < max(bssid_index, ssid_index, channel_index, signal_index)
+                            + 1
+                        ):
+                            continue
+                        bssid = parts[bssid_index]
+                        channel = parts[channel_index]
+                        ssid = (
+                            parts[ssid_index] if len(parts) > ssid_index else "<Hidden>"
+                        )
+                        signal = int(parts[signal_index])  # Signal strength in dBm
+                        clients = (
+                            parts[clients_index]
+                            if clients_index and len(parts) > clients_index
+                            else "0"
+                        )
                         temp_networks.append(
                             {
                                 "BSSID": bssid,
@@ -108,17 +136,20 @@ def scan_networks(interface):
                 + "[+] Scanning for available Wi-Fi networks... Press Ctrl+C to stop scanning."
             )
             print(Fore.CYAN + "[+] Available Wi-Fi networks:")
-            for i, network in enumerate(networks):
-                signal_strength = abs(network["Signal"])
-                if signal_strength <= 50:
-                    color = Fore.GREEN  # Strong signal
-                elif 50 < signal_strength <= 70:
-                    color = Fore.YELLOW  # Moderate signal
-                else:
-                    color = Fore.RED  # Weak signal
-                print(
-                    f"{i + 1}. {color}SSID: {network['SSID']}, BSSID: {network['BSSID']}, Channel: {network['Channel']}, Signal: {network['Signal']} dBm, Clients: {network['Clients']}"
-                )
+            if not networks:
+                print(Fore.YELLOW + "[-] No networks detected yet. Please wait...")
+            else:
+                for i, network in enumerate(networks):
+                    signal_strength = abs(network["Signal"])
+                    if signal_strength <= 50:
+                        color = Fore.GREEN  # Strong signal
+                    elif 50 < signal_strength <= 70:
+                        color = Fore.YELLOW  # Moderate signal
+                    else:
+                        color = Fore.RED  # Weak signal
+                    print(
+                        f"{i + 1}. {color}SSID: {network['SSID']}, BSSID: {network['BSSID']}, Channel: {network['Channel']}, Signal: {network['Signal']} dBm, Clients: {network['Clients']}"
+                    )
             time.sleep(3)  # Refresh every 3 seconds
     except KeyboardInterrupt:
         print(Fore.YELLOW + "\n[+] Stopping Wi-Fi scan...")
