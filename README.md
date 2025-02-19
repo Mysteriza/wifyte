@@ -1,3 +1,6 @@
+![Visitor Count](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https://github.com/Mysteriza/wifyte&count_bg=%2379C83D&title_bg=%23555555&icon=github.svg&icon_color=%23E7E7E7&title=Visitors&edge_flat=false)
+![Repository Size](https://img.shields.io/github/repo-size/Mysteriza/wifyte)
+
 # WIFYTE
 A program to capture wifi handshake and then crack it using available wordlists (like Wifite does).....
 
