@@ -212,10 +212,10 @@ class Wifyte:
         )
 
         try:
-            # Scan for 5 seconds
-            for i in range(5):
+            # Scan for 8 seconds
+            for i in range(8):
                 time.sleep(1)
-                print(f"{Colors.BLUE}[*] Scanning... {i+1}/5{Colors.ENDC}", end="\r")
+                print(f"{Colors.BLUE}[*] Scanning... {i+1}/8{Colors.ENDC}", end="\r")
             print("\n")
         except KeyboardInterrupt:
             colored_log("warning", "Scanning stopped by user")
@@ -302,7 +302,7 @@ class Wifyte:
                 time.sleep(1)
             print("\n")
         except KeyboardInterrupt:
-            colored_log("warning", "Client detection stopped by user")
+            colored_log("warning", "Client detection stopped by user!")
         finally:
             proc.send_signal(signal.SIGTERM)
             proc.wait()
