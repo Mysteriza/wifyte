@@ -292,8 +292,15 @@ class Wifyte:
         )
 
         try:
-            # Wait for 8 seconds to detect clients
-            time.sleep(8)
+            # Wait for 10 seconds with countdown
+            duration = 10
+            for remaining_time in range(duration, 0, -1):
+                print(
+                    f"{Colors.BLUE}[*] Detecting clients... Time left: {remaining_time}s{Colors.ENDC}",
+                    end="\r",
+                )
+                time.sleep(1)
+            print("\n")
         except KeyboardInterrupt:
             colored_log("warning", "Client detection stopped by user")
         finally:
@@ -352,7 +359,7 @@ class Wifyte:
             subprocess.Popen(
                 deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            time.sleep(3)  # Wait between deauth attempts
+            time.sleep(2)  # Wait between deauth attempts
 
         colored_log("success", "Deauthentication completed for all connected clients.")
 
@@ -417,7 +424,7 @@ class Wifyte:
                 elapsed_time = int(time.time() - start_time)
                 remaining_time = max(0, timeout - elapsed_time)
                 print(
-                    f"{Colors.BLUE}[*] Capturing handshake... Time left: {remaining_time}s{Colors.ENDC}",
+                    f"{Colors.BLUE}[*] Capturing handshake... Time left: {remaining_time}{Colors.ENDC}",
                     end="\r",
                 )
                 if elapsed_time >= timeout:
@@ -582,7 +589,7 @@ class Wifyte:
             elif self.monitor_interface:
                 colored_log(
                     "success",
-                    f"Monitor mode remains active on {self.monitor_interface}",
+                    f"Monitor mode remains active on {self.monitor_interface}.",
                 )
 
             colored_log("info", "Program closed, thank you!")
@@ -591,7 +598,7 @@ class Wifyte:
             if self.monitor_interface:
                 colored_log(
                     "success",
-                    f"Monitor mode remains active on {self.monitor_interface}",
+                    f"Monitor mode remains active on {self.monitor_interface}.",
                 )
 
 
