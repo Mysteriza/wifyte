@@ -359,7 +359,7 @@ class Wifyte:
             subprocess.Popen(
                 deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            time.sleep(2)  # Wait between deauth attempts
+            time.sleep(0.8)  # Wait between deauth attempts
 
         colored_log("success", "Deauthentication completed for all connected clients.")
 
@@ -424,7 +424,7 @@ class Wifyte:
                 elapsed_time = int(time.time() - start_time)
                 remaining_time = max(0, timeout - elapsed_time)
                 print(
-                    f"{Colors.BLUE}[*] Capturing handshake... Time left: {remaining_time}{Colors.ENDC}",
+                    f"{Colors.BLUE}[*] Capturing handshake... Time left: {remaining_time}s{Colors.ENDC}",
                     end="\r",
                 )
                 if elapsed_time >= timeout:
@@ -462,7 +462,7 @@ class Wifyte:
                 self.handshake_found = True
                 self.stop_capture = True
                 break
-            time.sleep(1)
+            time.sleep(0.5)  # Check every 0.5 seconds
 
     def _check_handshake(self, cap_file: str) -> bool:
         """Check if capture file contains handshake"""
