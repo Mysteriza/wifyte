@@ -472,15 +472,17 @@ class Wifyte:
             colored_log("error", "Handshake file or wordlist not found")
             return None
 
-        colored_log("info", "Starting password cracking...")
         colored_log("info", f"Using wordlist: {self.wordlist_path}")
+        colored_log(
+            "info", "Cracking passwords. Please wait, this may take a while...."
+        )
 
         # Use aircrack-ng for cracking
         result = self.execute_command(
             ["aircrack-ng", "-w", self.wordlist_path, handshake_path]
         )
         if not result:
-            colored_log("error", "Error cracking password")
+            colored_log("error", "Error cracking password!")
             return None
 
         # Check results
@@ -493,7 +495,7 @@ class Wifyte:
                 )
                 return password
 
-        colored_log("error", "Password not found in wordlist")
+        colored_log("error", "Password not found in wordlist! Better luck next time :)")
         return None
 
     def run(self):
@@ -529,7 +531,7 @@ class Wifyte:
                 self.crack_password(handshake_path)
 
         except KeyboardInterrupt:
-            colored_log("warning", "Program cancelled by user")
+            colored_log("warning", "Program cancelled by user!")
         finally:
             self._exit_program()
 
@@ -562,7 +564,6 @@ class Wifyte:
  ╚══╝╚══╝ ╚═╝╚═╝        ╚═╝      ╚═╝   ╚══════╝
 {Colors.ENDC}
 {Colors.YELLOW}         WiFi Handshake Capture & Cracking Tool{Colors.ENDC}
-{Colors.GREEN}           -- Optimized Speed Version --{Colors.ENDC}
 """
         print(banner)
 
@@ -586,7 +587,7 @@ class Wifyte:
 
             colored_log("info", "Program closed, thank you!")
         except KeyboardInterrupt:
-            colored_log("warning", "Program cancelled by user")
+            colored_log("warning", "Program cancelled by user!")
             if self.monitor_interface:
                 colored_log(
                     "success",
