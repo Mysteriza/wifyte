@@ -21,6 +21,16 @@ The tool is designed to be user-friendly, with clear logging and minimal depende
 ![Screenshot 2025-02-19 194710](https://github.com/user-attachments/assets/c08a95c5-13a2-4730-8619-026f390bfb79)
 
 You need the TP-Link TL-WN722N V1 WiFi Adapter or another wifi adapter that supports running this program to use Monitor Mode.
+
+## How to use
+- Clone this repo:
+  ```
+  git clone https://github.com/Mysteriza/wifyte.git && cd wifyte
+  ```
+- Run the command:
+  ```
+  sudo python3 wifyte.py
+  ```
 ## Disclaimer
 This tool is intended solely for educational and ethical purposes. It has been developed to help users understand Wi-Fi security vulnerabilities and improve network protection.
 
