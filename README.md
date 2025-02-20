@@ -2,16 +2,25 @@
 ![Repository Size](https://img.shields.io/github/repo-size/Mysteriza/wifyte)
 
 # WIFYTE
-A program to capture wifi handshake and then crack it using available wordlists (like Wifite does).....
+Wifyte is a simple Python-based WiFi handshake capture and password cracking tool that leverages tools like airodump-ng, aireplay-ng, and aircrack-ng, inspired by the [Wifite](https://github.com/derv82/wifite2) tool. It simplifies the workflow by handling tasks such as:
+- Scanning for available WiFi networks.
+- Detecting connected clients on a target network.
+- Deauthenticating clients to force reconnection and capture handshakes.
+- Saving captured handshakes for further analysis.
+- Cracking passwords using a customizable wordlist.
 
-But the program is not working properly on **deauthing process**. You can check it and make changes if you want. Feel free to contact me :)
+The tool is designed to be user-friendly, with clear logging and minimal dependencies. It is ideal for educational purposes, penetration testing, and improving network security.
 
-Telegram: [Mysteriza](https://t.me/Mysteriza)
+## Key Features
+- Automated Workflow : Automatically scans networks, detects clients, and captures handshakes.
+- Deauthentication Attacks : Forces clients to reconnect, increasing the chances of capturing a handshake.
+- Password Cracking : Uses a wordlist to crack captured handshakes efficiently.
+- Lightweight and Fast : Optimized for speed and minimal resource usage.
 
 ## Screenshot
-![Screenshot 2025-02-19 194710](https://github.com/user-attachments/assets/924221d5-9e2d-4a41-85f5-eec9705f5e1f)
+![Screenshot 2025-02-19 194710](https://github.com/user-attachments/assets/c08a95c5-13a2-4730-8619-026f390bfb79)
 
-BTW You need TP-Link TL-WN722N V1 WiFi Adapter to run this program for using Monitor Mode.
+You need the TP-Link TL-WN722N V1 WiFi Adapter or another wifi adapter that supports running this program to use Monitor Mode.
 ## Disclaimer
 This tool is intended solely for educational and ethical purposes. It has been developed to help users understand Wi-Fi security vulnerabilities and improve network protection.
 
