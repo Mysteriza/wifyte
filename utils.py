@@ -4,37 +4,37 @@ import threading
 import time
 import sys
 from typing import Optional
+from rich.console import Console
+
+# Rich console setup
+console = Console()
 
 # Logging configuration for terminal only
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("wifyte")
 
 
-# ANSI Color codes
-class Colors:
-    HEADER = "\033[95m"
-    BLUE = "\033[94m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    RED = "\033[91m"
-    ENDC = "\033[0m"
-    BOLD = "\033[1m"
-
-
-# Log with color to terminal only
-def colored_log(level, msg, enabled=True):
-    """Log with color to terminal"""
+# Log with rich styling
+def colored_log(level: str, msg: str, enabled=True):
+    """Log with rich styling to terminal"""
     if not enabled:
         return
 
-    color_map = {
-        "info": Colors.BLUE,
-        "success": Colors.GREEN,
-        "warning": Colors.YELLOW,
-        "error": Colors.RED,
+    style_map = {
+        "info": "bright_cyan",  # Brighter cyan for info
+        "success": "green bold",  # Kept as requested
+        "warning": "yellow",  # Kept as requested
+        "error": "bright_red",  # Brighter red for error
     }
-    prefix = {"info": "[*]", "success": "[+]", "warning": "[!]", "error": "[!]"}
-    logger.info(f"{color_map.get(level, '')}{prefix.get(level, '')} {msg}{Colors.ENDC}")
+    prefix_map = {
+        "info": "[*]",
+        "success": "[+]",
+        "warning": "[!]",
+        "error": "[!]",
+    }
+    style = style_map.get(level, "white")
+    prefix = prefix_map.get(level, "[*]")
+    console.print(f"{prefix} {msg}", style=style)
 
 
 def execute_command(
@@ -54,78 +54,74 @@ def select_target(networks):
     """Select target network with input validation"""
     while True:
         try:
-            choice = int(
-                input(
-                    f"\n{Colors.YELLOW}[?] Select Target [1-{len(networks)}]: {Colors.ENDC}"
-                )
+            console.print(
+                f"\n[?] Select Target [1-{len(networks)}]",
+                style="yellow bold",
+                end=": ",
             )
+            choice = int(input())
             if 1 <= choice <= len(networks):
                 return networks[choice - 1]
             else:
-                colored_log("error", "Invalid choice. Please try again.")
+                colored_log("error", "Invalid choice. Please try again")
         except (ValueError, KeyboardInterrupt):
-            colored_log("warning", "Invalid input or cancelled.")
+            colored_log("warning", "Invalid input or cancelled")
             return None
 
 
 def _display_banner():
-    """Display program banner"""
-    banner = f"""
-{Colors.BOLD}{Colors.BLUE}
+    """Display program banner with rich"""
+    banner = """
 ██╗    ██╗██╗███████╗██╗   ██╗████████╗███████╗
 ██║    ██║██║██╔════╝╚██╗ ██╔╝╚══██╔══╝██╔════╝
 ██║ █╗ ██║██║█████╗   ╚████╔╝    ██║   █████╗  
 ██║███╗██║██║██╔══╝    ╚██╔╝     ██║   ██╔══╝  
 ╚███╔███╔╝██║██║        ██║      ██║   ███████╗
  ╚══╝╚══╝ ╚═╝╚═╝        ╚═╝      ╚═╝   ╚══════╝
-{Colors.ENDC}
-{Colors.YELLOW}    WiFi Handshake Capture & Cracking Tool{Colors.ENDC}
-"""
-    print(banner)
+    """
+    console.print(banner, style="bright_cyan bold")
+    console.print(
+        "WiFi Handshake Capture & Cracking Tool", style="yellow", justify="left"
+    )
 
 
 def _exit_program(self):
-    """Clean exit"""
+    """Clean exit with rich"""
     try:
         from interface import toggle_monitor_mode
 
-        disable_monitor = (
-            input(
-                f"\n{Colors.YELLOW}[?] Disable monitor mode? (y/n): {Colors.ENDC}"
-            ).lower()
-            == "y"
-        )
+        console.print("[?] Disable monitor mode? (y/n)", style="yellow bold", end=": ")
+        disable_monitor = input().lower() == "y"
 
         if disable_monitor and self.monitor_interface:
             toggle_monitor_mode(self, self.monitor_interface, enable=False)
         elif self.monitor_interface:
             colored_log(
-                "success",
-                f"Monitor mode remains active on {self.monitor_interface}.",
+                "success", f"Monitor mode remains active on {self.monitor_interface}"
             )
 
-        colored_log("info", "Program closed, thank you!")
+        colored_log("info", "Program closed, thank you")
     except KeyboardInterrupt:
-        colored_log("warning", "Program cancelled by user!")
+        colored_log("warning", "Program cancelled by user")
         if self.monitor_interface:
             colored_log(
-                "success",
-                f"Monitor mode remains active on {self.monitor_interface}.",
+                "success", f"Monitor mode remains active on {self.monitor_interface}"
             )
 
 
-# Animation for loading spinner (modern Braille style)
+# Animation for loading spinner (modern Braille style with color)
 def loading_spinner(stop_event: threading.Event, message: str):
     """Display a modern spinning loader animation until stop_event is set"""
     spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     idx = 0
     while not stop_event.is_set():
-        sys.stdout.write(
-            f"\r{Colors.BLUE}[*] {message} {spinner[idx % len(spinner)]}{Colors.ENDC}"
+        console.print(
+            f"[*] {message} {spinner[idx % len(spinner)]}",
+            style="bright_cyan",
+            end="\r",
         )
         sys.stdout.flush()
         time.sleep(0.1)
         idx += 1
-    # Clear the line completely and move to new line
-    sys.stdout.write(f"\r{' ' * (len(message) + 10)}\r{Colors.ENDC}\n")
+    console.print(f"{' ' * (len(message) + 10)}", end="\r\n")
     sys.stdout.flush()

@@ -3,7 +3,11 @@ import time
 import signal
 import subprocess
 from dataclasses import dataclass
-from utils import colored_log, Colors
+from utils import colored_log
+from rich.console import Console
+
+# Rich console setup
+console = Console()
 
 
 @dataclass
@@ -16,7 +20,7 @@ class WiFiNetwork:
     encryption: str
 
     def __str__(self) -> str:
-        return f"{Colors.BOLD}[{self.id}]{Colors.ENDC} {Colors.GREEN}{self.essid}{Colors.ENDC} ({self.bssid}) - CH:{self.channel} PWR:{self.power} {Colors.YELLOW}{self.encryption}{Colors.ENDC}"
+        return f"[bold][{self.id}][/bold] [bright_green]{self.essid}[/bright_green] ([green]{self.bssid}[/green]) - CH:{self.channel} PWR:{self.power} [yellow]{self.encryption}[/yellow]"
 
 
 def scan_networks(self) -> list[WiFiNetwork]:
@@ -43,7 +47,6 @@ def scan_networks(self) -> list[WiFiNetwork]:
     )
 
     try:
-        # Scan for 8 seconds without logging every second
         time.sleep(8)
     except KeyboardInterrupt:
         colored_log("warning", "Scanning stopped by user")
@@ -77,9 +80,7 @@ def scan_networks(self) -> list[WiFiNetwork]:
                                 WiFiNetwork(
                                     id=network_id,
                                     bssid=parts[0],
-                                    channel=(
-                                        int(parts[3]) if parts[3].isdigit() else 0
-                                    ),
+                                    channel=int(parts[3]) if parts[3].isdigit() else 0,
                                     power=(
                                         int(parts[8])
                                         if parts[8].lstrip("-").isdigit()
@@ -97,19 +98,16 @@ def scan_networks(self) -> list[WiFiNetwork]:
         colored_log("error", "Scan results file not found")
 
     if networks:
-        colored_log("success", f"Found {len(networks)} networks.")
+        colored_log("success", f"Found {len(networks)} networks")
     else:
-        colored_log("warning", "No networks detected.")
+        colored_log("warning", "No networks detected")
 
     return networks
 
 
 def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
     """Detect connected clients to the target network"""
-    colored_log(
-        "info",
-        f"Detecting connected clients for {network.essid}...",
-    )
+    colored_log("info", f"Detecting connected clients for {network.essid}...")
     output_file = os.path.join(self.temp_dir, "clients-01.csv")
 
     # Start airodump-ng to detect clients
@@ -129,10 +127,9 @@ def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
     )
 
     try:
-        # Wait for 10 seconds without logging every second
         time.sleep(10)
     except KeyboardInterrupt:
-        colored_log("warning", "Client detection stopped by user!")
+        colored_log("warning", "Client detection stopped by user")
     finally:
         proc.send_signal(signal.SIGTERM)
         proc.wait()
@@ -160,8 +157,8 @@ def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
         colored_log("error", "Client detection results file not found")
 
     if clients:
-        colored_log("success", f"Detected {len(clients)} connected clients.")
+        colored_log("success", f"Detected {len(clients)} connected clients")
     else:
-        colored_log("warning", "No connected clients detected.")
+        colored_log("warning", "No connected clients detected")
 
     return clients

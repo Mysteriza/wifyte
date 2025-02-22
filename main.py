@@ -7,7 +7,11 @@ from interface import setup_interface
 from scanner import scan_networks
 from capture import capture_handshake
 from cracker import crack_password
-from utils import colored_log, select_target, _display_banner, _exit_program, Colors
+from utils import colored_log, select_target, _display_banner, _exit_program
+from rich.console import Console
+
+# Rich console setup
+console = Console()
 
 
 class Wifyte:
@@ -27,10 +31,10 @@ class Wifyte:
         self.wordlist_path = os.path.join(os.getcwd(), "wifyte.txt")
         if not os.path.exists(self.wordlist_path):
             colored_log("warning", f"Wordlist not found in {self.wordlist_path}")
-            colored_log("warning", "Creating default wordlist...")
+            colored_log("warning", "Creating default wordlist")
             with open(self.wordlist_path, "w") as f:
                 f.write("password\n12345678\nqwerty123\nadmin123\nwifi12345\n")
-            colored_log("success", "Default wordlist created.")
+            colored_log("success", "Default wordlist created")
 
     def __del__(self):
         try:
@@ -48,31 +52,17 @@ class Wifyte:
             self.networks = scan_networks(self)
 
             if not self.networks:
-                colored_log("error", "No networks found.")
+                colored_log("error", "No networks found")
                 _exit_program(self)
                 return
 
-            # Scan and allow rescan
-            while True:
-                # Display networks
-                print(
-                    f"\n{Colors.BLUE}===== {len(self.networks)} Networks found ====={Colors.ENDC}"
-                )
-                for network in self.networks:
-                    print(network)
-
-                # Ask user if they want to rescan
-                rescan = input(
-                    f"\n{Colors.YELLOW}[?] Rescan networks? (y/ENTER to SKIP): {Colors.ENDC}"
-                ).lower()
-                if rescan != "y":
-                    break
-                colored_log("info", "Rescanning networks...")
-                self.networks = scan_networks(self)
-                if not self.networks:
-                    colored_log("error", "No networks found after rescan.")
-                    _exit_program(self)
-                    return
+            # Display networks and proceed directly to target selection
+            console.print(
+                f"\n===== {len(self.networks)} Networks found =====",
+                style="bright_cyan",
+            )
+            for network in self.networks:
+                console.print(str(network))
 
             # Select target
             target = select_target(self.networks)
@@ -88,12 +78,12 @@ class Wifyte:
             )
             if os.path.exists(cap_file):
                 colored_log("info", f"Found existing handshake file: {cap_file}")
-                use_existing = (
-                    input(
-                        f"{Colors.YELLOW}[?] Use existing handshake file and skip capture? (y/n): {Colors.ENDC}"
-                    ).lower()
-                    == "y"
+                console.print(
+                    "[?] Use existing handshake file and skip capture? (y/n)",
+                    style="yellow bold",
+                    end=": ",
                 )
+                use_existing = input().lower() == "y"
                 if use_existing:
                     # Skip capture and go straight to cracking with network details
                     crack_password(cap_file, self.wordlist_path, target)
@@ -111,7 +101,7 @@ class Wifyte:
             _exit_program(self)
 
         except KeyboardInterrupt:
-            colored_log("warning", "Program cancelled by user!")
+            colored_log("warning", "Program cancelled by user")
             _exit_program(self)
 
 

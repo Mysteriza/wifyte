@@ -1,13 +1,17 @@
 import os
+import sys
 import time
 import signal
 import subprocess
 import threading
 import shutil
 from datetime import datetime
-from utils import colored_log, Colors
+from utils import colored_log, execute_command
 from scanner import detect_connected_clients
-import sys
+from rich.console import Console
+
+# Rich console setup
+console = Console()
 
 
 def capture_handshake(self, network) -> str | None:
@@ -21,7 +25,7 @@ def capture_handshake(self, network) -> str | None:
     if not clients:
         colored_log(
             "error",
-            f"No connected clients detected for {network.essid}. Stopping process.",
+            f"No connected clients detected for {network.essid}. Stopping process",
         )
         return None
 
@@ -33,7 +37,7 @@ def capture_handshake(self, network) -> str | None:
     capture_name = f"{network.essid.replace(' ', '_')}_{timestamp}"
     capture_path = os.path.join(self.temp_dir, capture_name)
 
-    colored_log("info", f"Starting handshake capture for {network.essid}...")
+    colored_log("info", f"Starting handshake capture for {network.essid}")
 
     # Start capture process
     capture_cmd = [
@@ -61,26 +65,29 @@ def capture_handshake(self, network) -> str | None:
             remaining_time = max(0, timeout - elapsed_time)
             minutes, seconds = divmod(remaining_time, 60)
             time_str = f"{minutes:02d}:{seconds:02d} remaining"
-            sys.stdout.write(
-                f"\r{Colors.BLUE}[*] Capturing handshake for {network.essid}: {time_str}{Colors.ENDC}"
+            # Use rich console for styled countdown
+            console.print(
+                f"[*] Capturing handshake for {network.essid}: {time_str}",
+                style="bright_cyan",
+                end="\r",
             )
             sys.stdout.flush()
 
             # Check for handshake directly in main thread
             if os.path.exists(cap_file) and _check_handshake(self, cap_file):
-                sys.stdout.write(f"\r{' ' * 80}\r")  # Clear line with enough spaces
+                console.print(f"{' ' * 80}", end="\r")  # Clear line
                 sys.stdout.flush()
                 colored_log("success", "Handshake detected!")
                 break
 
             if elapsed_time >= timeout:
-                sys.stdout.write(f"\r{' ' * 80}\r")  # Clear line with enough spaces
+                console.print(f"{' ' * 80}", end="\r")  # Clear line
                 sys.stdout.flush()
-                colored_log("warning", "Handshake capture timed out after 1 minute.")
+                colored_log("warning", "Handshake capture timed out after 1 minute")
                 break
             time.sleep(1)
     except KeyboardInterrupt:
-        sys.stdout.write(f"\r{' ' * 80}\r")  # Clear line with enough spaces
+        console.print(f"{' ' * 80}", end="\r")  # Clear line
         sys.stdout.flush()
         colored_log("warning", "Capture cancelled by user")
     finally:
@@ -88,7 +95,7 @@ def capture_handshake(self, network) -> str | None:
         capture_proc.wait()
 
     if not os.path.exists(cap_file) or not _check_handshake(self, cap_file):
-        colored_log("error", "Failed to capture handshake after deauthentication.")
+        colored_log("error", "Failed to capture handshake after deauthentication")
         return None
 
     # Save handshake file
@@ -104,7 +111,7 @@ def deauthenticate_clients(self, network, clients: list[str]):
     """Deauthenticate all connected clients using multithreading without waiting"""
     colored_log(
         "info",
-        f"Starting deauthentication for {len(clients)} clients on {network.essid}...",
+        f"Starting deauthentication for {len(clients)} clients on {network.essid}",
     )
 
     def deauth_client(client: str):
@@ -124,7 +131,7 @@ def deauthenticate_clients(self, network, clients: list[str]):
 
     threads = []
     for client in clients:
-        colored_log("info", f"Sending deauth to client {client}...")
+        colored_log("info", f"Sending deauth to client {client}")
         thread = threading.Thread(target=deauth_client, args=(client,))
         thread.daemon = True
         thread.start()
@@ -141,22 +148,19 @@ def deauthenticate_clients(self, network, clients: list[str]):
         network.bssid,
         self.monitor_interface,
     ]
-    colored_log("info", "Sending broadcast deauthentication...")
+    colored_log("info", "Sending broadcast deauthentication")
     subprocess.Popen(
         broadcast_deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
     colored_log(
-        "success", "Deauthentication process initiated for all connected clients."
+        "success", "Deauthentication process initiated for all connected clients"
     )
 
 
 def _check_handshake(self, cap_file: str) -> bool:
-    """Check if capture file contains handshake"""
-    from utils import execute_command
-
+    """Check if capture file contains a handshake"""
     if not os.path.exists(cap_file):
         return False
-
     result = execute_command(["aircrack-ng", cap_file])
     return result and "1 handshake" in result.stdout
