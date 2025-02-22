@@ -63,7 +63,7 @@ class Wifyte:
 
                 # Ask user if they want to rescan
                 rescan = input(
-                    f"\n{Colors.YELLOW}[?] Rescan networks? (y/ENTER to skip): {Colors.ENDC}"
+                    f"\n{Colors.YELLOW}[?] Rescan networks? (y/ENTER to SKIP): {Colors.ENDC}"
                 ).lower()
                 if rescan != "y":
                     break
@@ -95,8 +95,8 @@ class Wifyte:
                     == "y"
                 )
                 if use_existing:
-                    # Skip capture and go straight to cracking
-                    crack_password(cap_file, self.wordlist_path)
+                    # Skip capture and go straight to cracking with network details
+                    crack_password(cap_file, self.wordlist_path, target)
                     _exit_program(self)
                     return
             else:
@@ -107,7 +107,7 @@ class Wifyte:
             # Proceed with capture if no existing file or user chooses "n"
             handshake_path = capture_handshake(self, target)
             if handshake_path:
-                crack_password(handshake_path, self.wordlist_path)
+                crack_password(handshake_path, self.wordlist_path, target)
             _exit_program(self)
 
         except KeyboardInterrupt:
