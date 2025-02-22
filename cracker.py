@@ -28,7 +28,7 @@ def crack_password(handshake_path: str, wordlist_path: str, network) -> str | No
     stop_event = threading.Event()
     animation_thread = threading.Thread(
         target=loading_spinner,
-        args=(stop_event, "Cracking password"),
+        args=(stop_event, "Cracking password, this will take some time..."),
     )
     animation_thread.daemon = True
     animation_thread.start()
@@ -80,7 +80,7 @@ def crack_password(handshake_path: str, wordlist_path: str, network) -> str | No
             colored_log("info", f"Results saved to {result_file}")
             return password
 
-    colored_log("error", "Password not found in wordlist! Better luck next time")
+    colored_log("error", "Password not found in wordlist! Better luck next time!")
     return None
 
 
