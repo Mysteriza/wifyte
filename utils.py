@@ -79,7 +79,7 @@ def _display_banner():
 ╚███╔███╔╝██║██║        ██║      ██║   ███████╗
  ╚══╝╚══╝ ╚═╝╚═╝        ╚═╝      ╚═╝   ╚══════╝
 {Colors.ENDC}
-{Colors.YELLOW}  WiFi Handshake Capture & Cracking Tool{Colors.ENDC}
+{Colors.YELLOW}    WiFi Handshake Capture & Cracking Tool{Colors.ENDC}
 """
     print(banner)
 
