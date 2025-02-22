@@ -28,7 +28,7 @@ def crack_password(handshake_path: str, wordlist_path: str, network) -> str | No
     stop_event = threading.Event()
     animation_thread = threading.Thread(
         target=loading_spinner,
-        args=(stop_event, "Cracking password, this will take some time..."),
+        args=(stop_event, "Cracking password, this will take some time"),
     )
     animation_thread.daemon = True
     animation_thread.start()
