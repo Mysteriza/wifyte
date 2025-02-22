@@ -3,7 +3,7 @@ import os
 import sys
 import tempfile
 import shutil
-from interface import setup_interface, toggle_monitor_mode
+from interface import setup_interface
 from scanner import scan_networks
 from capture import capture_handshake
 from cracker import crack_password
