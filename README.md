@@ -1,44 +1,58 @@
 ![Visitor Count](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https://github.com/Mysteriza/wifyte&count_bg=%2379C83D&title_bg=%23555555&icon=github.svg&icon_color=%23E7E7E7&title=Visitors&edge_flat=false)
 ![Repository Size](https://img.shields.io/github/repo-size/Mysteriza/wifyte)
+![Python Version](https://img.shields.io/badge/python-3.12-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 # WIFYTE
-Wifyte is a simple Python-based WiFi handshake capture and password cracking tool that leverages tools like airodump-ng, aireplay-ng, and aircrack-ng, inspired by the [Wifite](https://github.com/derv82/wifite2) tool. It simplifies the workflow by handling tasks such as:
-- Scanning for available WiFi networks.
-- Detecting connected clients on a target network.
-- Deauthenticating clients to force reconnection and capture handshakes.
-- Saving captured handshakes for further analysis.
-- Cracking passwords using a customizable wordlist.
 
-The tool is designed to be user-friendly, with clear logging and minimal dependencies. It is ideal for educational purposes, penetration testing, and improving network security.
+**Wifyte** is a simple yet powerful Python-based tool for capturing Wi-Fi handshakes and cracking passwords, inspired by [Wifite](https://github.com/derv82/wifite2). Built on top of tools like `airodump-ng`, `aireplay-ng`, and `aircrack-ng`, Wifyte automates the Wi-Fi pentesting process with an intuitive and efficient workflow. Perfect for educational purposes, ethical hacking, and strengthening network security.
 
 ## Key Features
-- Automated Workflow : Automatically scans networks, detects clients, and captures handshakes.
-- Deauthentication Attacks : Forces clients to reconnect, increasing the chances of capturing a handshake.
-- Password Cracking : Uses a wordlist to crack captured handshakes efficiently.
-- Lightweight and Fast : Optimized for speed and minimal resource usage.
+- **Automated Network Scanning**: Quickly scans for encrypted Wi-Fi networks in range.
+- **Hidden SSID Detection**: Identifies and decloaks hidden SSIDs for further analysis.
+- **Client Deauthentication**: Forces clients to reconnect, enabling handshake capture.
+- **Password Cracking**: Cracks passwords from captured handshakes using a custom wordlist.
+- **Vendor Information**: Displays router vendor names (e.g., ZTE, ASKEY) based on BSSID.
+- **Colorful Interface**: Enhanced terminal output with `rich` for a user-friendly experience.
+- **Lightweight & Fast**: Optimized for speed and low resource usage.
 
 ## Screenshot
-![Screenshot 2025-02-19 194710](https://github.com/user-attachments/assets/c08a95c5-13a2-4730-8619-026f390bfb79)
+![Screenshot 2025-02-23 170050](https://github.com/user-attachments/assets/ffa191b6-de9f-49dc-9b01-4b9f62615479)
 
-You need the TP-Link TL-WN722N V1 WiFi Adapter or another wifi adapter that supports running this program to use Monitor Mode.
 
-## How to use
-- Clone this repo:
-  ```
-  git clone https://github.com/Mysteriza/wifyte.git && cd wifyte
-  ```
-- Run the command:
-  ```
-  sudo python3 main.py
-  ```
+## Requirements
+- **Operating System**: Linux (recommended: Kali Linux or any distro with `aircrack-ng` support).
+- **Wi-Fi Adapter**: A monitor-mode-capable adapter (e.g., TP-Link TL-WN722N V1).
+- **System Dependencies**: 
+  - `aircrack-ng` suite (`airmon-ng`, `airodump-ng`, `aireplay-ng`, `aircrack-ng`).
+  - Install via:
+    ```
+    sudo apt update && sudo apt install aircrack-ng
+    ```
+## Installation
+  - Clone the Repository:
+    ```
+    git clone https://github.com/Mysteriza/wifyte.git && cd wifyte
+    ```
+  - Install library:
+    ```
+    sudo python3 -m pip install -r requirements.txt
+    ```
+  - Run:
+    ```
+    sudo python3 main.py
+    ```
+## Usage
+After running the tool, it will:
+- Scan and list encrypted or hidden Wi-Fi networks with signal strength and vendor details.
+- Prompt you to select a target network.
+- Offer to use an existing handshake file or capture a new one.
+- Perform deauthentication and crack the password using the specified wordlist.
+
 ## Disclaimer
-This tool is intended solely for educational and ethical purposes. It has been developed to help users understand Wi-Fi security vulnerabilities and improve network protection.
-
-By using this tool, you agree to the following terms:
-
-1. You will only use this tool on networks or systems for which you have explicit permission.
-2. You will not use this tool for any illegal, malicious, or unauthorized activities.
-3. Any misuse of this tool is strictly prohibited and may violate applicable laws and regulations.
-4. The developer(s) and maintainer(s) of this tool are not responsible for any damage, harm, or legal consequences caused by the misuse of this software.
-
-Use it responsibly and always act within the boundaries of the law.
+Wifyte is intended for educational and ethical testing purposes only. By using this tool, you agree to:
+- Use it only on networks or systems for which you have explicit permission.
+- Refrain from any illegal, malicious, or unauthorized activities.
+- Understand that misuse of this tool may violate applicable laws and is strictly prohibited.
+  
+The developers and maintainers are not liable for any damage, harm, or legal consequences resulting from misuse. Use responsibly and comply with local laws.
