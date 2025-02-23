@@ -4,7 +4,7 @@ import sys
 import tempfile
 import shutil
 from interface import setup_interface
-from scanner import scan_networks
+from scanner import scan_networks, decloak_ssid
 from capture import capture_handshake
 from cracker import crack_password
 from utils import colored_log, select_target, _display_banner, _exit_program
@@ -69,6 +69,18 @@ class Wifyte:
             if not target:
                 _exit_program(self)
                 return
+
+            # Decloak hidden SSID if necessary
+            if target.essid == "<HIDDEN SSID>":
+                revealed_ssid = decloak_ssid(self, target)
+                if revealed_ssid:
+                    target.essid = revealed_ssid
+                    colored_log("success", f"Target SSID updated to: {target.essid}")
+                else:
+                    colored_log(
+                        "error",
+                        "Failed to decloak SSID. Proceeding with capture anyway",
+                    )
 
             colored_log("success", f"Selected target: {target.essid} ({target.bssid})")
 
