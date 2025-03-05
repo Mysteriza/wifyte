@@ -1,5 +1,4 @@
 import sys
-import subprocess
 from utils import execute_command, colored_log
 
 
