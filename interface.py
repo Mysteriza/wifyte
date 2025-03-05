@@ -1,4 +1,5 @@
 import sys
+import subprocess
 from utils import execute_command, colored_log
 
 
@@ -14,7 +15,7 @@ def find_wifi_interfaces() -> list[str]:
     ]
 
 
-def toggle_monitor_mode(interface, enable=True) -> str | bool | None:
+def toggle_monitor_mode(self, interface, enable=True) -> str | bool | None:
     """Toggle monitor mode on/off"""
     if enable:
         # Kill interfering processes
