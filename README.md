@@ -21,8 +21,8 @@
 
 
 ## Requirements
-- **Operating System**: Linux (recommended: Kali Linux or any distro with `aircrack-ng` support).
-- **Wi-Fi Adapter**: A monitor-mode-capable adapter (e.g., TP-Link TL-WN722N V1).
+- **Operating System**: Linux (recommended: [Kali Linux](https://www.kali.org/get-kali/#kali-platforms) or any distro with `aircrack-ng` support).
+- **Wi-Fi Adapter**: A monitor-mode-capable adapter (e.g., TP-Link TL-WN722N V1 or [ALFA Network AWUS036ACS](https://www.amazon.com/Network-AWUS036ACS-Wide-Coverage-Dual-Band-High-Sensitivity/dp/B0752CTSGD?sr=8-2)).
 - **System Dependencies**: 
   - `aircrack-ng` suite (`airmon-ng`, `airodump-ng`, `aireplay-ng`, `aircrack-ng`).
   - Install via:
@@ -48,6 +48,7 @@ After running the tool, it will:
 - Prompt you to select a target network.
 - Offer to use an existing handshake file (if any) or capture a new one.
 - Perform deauthentication and crack the password using the specified wordlist.
+- If the password is in the wordlist, the program will give you the password. This shows that your WiFi is not secure because the password is commonly used.
 
 ## Disclaimer
 Wifyte is intended for educational and ethical testing purposes only. By using this tool, you agree to:
