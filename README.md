@@ -42,11 +42,11 @@
     ```
     sudo python3 main.py
     ```
-## Usage
+## How it works
 After running the tool, it will:
 - Scan and list encrypted or hidden Wi-Fi networks with signal strength and vendor details.
 - Prompt you to select a target network.
-- Offer to use an existing handshake file or capture a new one.
+- Offer to use an existing handshake file (if any) or capture a new one.
 - Perform deauthentication and crack the password using the specified wordlist.
 
 ## Disclaimer
