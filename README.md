@@ -22,7 +22,7 @@
 
 ## Requirements
 - **Operating System**: Linux (recommended: [Kali Linux](https://www.kali.org/get-kali/#kali-platforms) or any distro with `aircrack-ng` support).
-- **Wi-Fi Adapter**: A monitor-mode-capable adapter (e.g., TP-Link TL-WN722N V1 or [ALFA Network AWUS036ACS](https://www.amazon.com/Network-AWUS036ACS-Wide-Coverage-Dual-Band-High-Sensitivity/dp/B0752CTSGD?sr=8-2)).
+- **Wi-Fi Adapter**: A monitor-mode-capable adapter (e.g., [TP-Link TL-WN722N V1](https://shopee.co.id/Tp-link-Tl-wn722N-versi-1-Second-i.225940473.8844432053) or [ALFA Network AWUS036ACS](https://www.amazon.com/Network-AWUS036ACS-Wide-Coverage-Dual-Band-High-Sensitivity/dp/B0752CTSGD?sr=8-2)).
 - **System Dependencies**: 
   - `aircrack-ng` suite (`airmon-ng`, `airodump-ng`, `aireplay-ng`, `aircrack-ng`).
   - Install via:
