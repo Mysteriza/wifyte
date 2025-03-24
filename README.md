@@ -10,6 +10,7 @@
 ## Key Features
 - **Automated Network Scanning**: Quickly scans for encrypted Wi-Fi networks in range.
 - **Hidden SSID Detection**: Identifies and decloaks hidden SSIDs for further analysis.
+- **Multiple Targets Capture**: Capture handshakes and crack passwords for multiple networks sequentially by selecting several targets (e.g., "1, 2, 5").
 - **Client Deauthentication**: Forces clients to reconnect, enabling handshake capture.
 - **Password Cracking**: Cracks passwords from captured handshakes using a custom wordlist.
 - **Vendor Information**: Displays router vendor names (e.g., ZTE, ASKEY) based on BSSID.
