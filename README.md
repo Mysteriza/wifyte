@@ -21,8 +21,8 @@
 
 
 ## Requirements
-- **Operating System**: Linux (recommended: Kali Linux or any distro with `aircrack-ng` support).
-- **Wi-Fi Adapter**: A monitor-mode-capable adapter (e.g., TP-Link TL-WN722N V1).
+- **Operating System**: Linux (recommended: [Kali Linux](https://www.kali.org/get-kali/#kali-platforms) or any distro with `aircrack-ng` support).
+- **Wi-Fi Adapter**: A monitor-mode-capable adapter (e.g., [TP-Link TL-WN722N V1](https://shopee.co.id/Tp-link-Tl-wn722N-versi-1-Second-i.225940473.8844432053) or [ALFA Network AWUS036ACS](https://a.co/d/7L9FeR4) or [AR9271 802.11n 150Mbps](https://a.co/d/j7zGR3T)).
 - **System Dependencies**: 
   - `aircrack-ng` suite (`airmon-ng`, `airodump-ng`, `aireplay-ng`, `aircrack-ng`).
   - Install via:
@@ -42,12 +42,13 @@
     ```
     sudo python3 main.py
     ```
-## Usage
+## How it works
 After running the tool, it will:
 - Scan and list encrypted or hidden Wi-Fi networks with signal strength and vendor details.
 - Prompt you to select a target network.
-- Offer to use an existing handshake file or capture a new one.
+- Offer to use an existing handshake file (if any) or capture a new one.
 - Perform deauthentication and crack the password using the specified wordlist.
+- If the password is in the wordlist, the program will give you the password. This shows that your WiFi is not secure because the password is commonly used.
 
 ## Disclaimer
 Wifyte is intended for educational and ethical testing purposes only. By using this tool, you agree to:
