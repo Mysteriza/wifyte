@@ -13,7 +13,6 @@ from rich.console import Console
 # Rich console setup
 console = Console()
 
-
 class Wifyte:
     def __init__(self):
         self.interface = None
@@ -43,7 +42,7 @@ class Wifyte:
             colored_log("error", f"Error clearing temp directory: {e}")
 
     def run(self):
-        """Main program flow"""
+        """Main program flow with support for multiple targets"""
         _display_banner()
 
         try:
@@ -56,73 +55,81 @@ class Wifyte:
                 _exit_program(self)
                 return
 
-            # Display networks and proceed directly to target selection
-            console.print(
-                f"\n===== {len(self.networks)} Networks found =====",
-                style="bright_cyan",
-            )
+            # Display networks
+            console.print(f"\n===== {len(self.networks)} Networks found =====", style="bright_cyan")
             for network in self.networks:
                 console.print(str(network))
 
-            # Select target
-            target = select_target(self.networks)
-            if not target:
+            # Select target(s)
+            targets = select_target(self.networks)
+            if not targets:
                 _exit_program(self)
                 return
 
-            # Decloak hidden SSID if necessary
-            if target.essid == "<HIDDEN SSID>":
-                revealed_ssid = decloak_ssid(self, target)
-                if revealed_ssid:
-                    target.essid = revealed_ssid
-                    colored_log("success", f"Target SSID updated to: {target.essid}")
+            # Handle single or multiple targets
+            if len(targets) > 1:
+                console.print("\n=== Multiple Targets Mode ===", style="bold magenta")
+                console.print(f"Selected {len(targets)} targets for processing:", style="bright_cyan")
+                for target in targets:
+                    console.print(f"- {target.essid} ({target.bssid})", style="green")
+
+            # Process each target sequentially
+            handshake_files = []
+            for i, target in enumerate(targets, 1):
+                if len(targets) > 1:
+                    console.print(f"\n[Processing Target {i}/{len(targets)}]", style="bold yellow")
+                    colored_log("success", f"Selected target: {target.essid} ({target.bssid})")
+
+                    # Decloak hidden SSID if necessary
+                    if target.essid == "<HIDDEN SSID>":
+                        revealed_ssid = decloak_ssid(self, target)
+                        if revealed_ssid:
+                            target.essid = revealed_ssid
+                            colored_log("success", f"Target SSID updated to: {target.essid}")
+                        else:
+                            colored_log("error", "Failed to decloak SSID. Proceeding with capture anyway")
+
+                # Check for existing .cap file
+                cap_file = os.path.join(self.handshake_dir, f"{target.essid.replace(' ', '_')}.cap")
+                if os.path.exists(cap_file):
+                    colored_log("info", f"Found existing handshake file: {cap_file}")
+                    console.print("[?] Use existing handshake file and skip capture? (y/n)", style="yellow bold", end=": ")
+                    use_existing = input().lower() == "y"
+                    if use_existing:
+                        handshake_files.append(cap_file)
+                        continue
+
+                # Capture handshake if no existing file or user chooses "n"
+                colored_log("info", f"No existing handshake file found for {target.essid}")
+                handshake_path = capture_handshake(self, target)
+                if handshake_path:
+                    handshake_files.append(handshake_path)
                 else:
-                    colored_log(
-                        "error",
-                        "Failed to decloak SSID. Proceeding with capture anyway",
-                    )
+                    colored_log("warning", f"Failed to capture handshake for {target.essid}. Skipping to next target.")
 
-            colored_log("success", f"Selected target: {target.essid} ({target.bssid})")
+            # Crack passwords for all captured handshakes
+            if handshake_files:
+                if len(targets) > 1:
+                    console.print("\n=== Starting Password Cracking ===", style="bold magenta")
+                for i, (handshake_path, target) in enumerate(zip(handshake_files, [t for t in targets if any(h.endswith(f"{t.essid.replace(' ', '_')}.cap") for h in handshake_files)]), 1):
+                    if len(targets) > 1:
+                        console.print(f"\n[Cracking Target {i}/{len(handshake_files)}]", style="bold yellow")
+                    colored_log("info", f"Cracking {target.essid} ({target.bssid})...")
+                    crack_password(handshake_path, self.wordlist_path, target)
 
-            # Check for existing .cap file before detecting clients
-            cap_file = os.path.join(
-                self.handshake_dir, f"{target.essid.replace(' ', '_')}.cap"
-            )
-            if os.path.exists(cap_file):
-                colored_log("info", f"Found existing handshake file: {cap_file}")
-                console.print(
-                    "[?] Use existing handshake file and skip capture? (y/n)",
-                    style="yellow bold",
-                    end=": ",
-                )
-                use_existing = input().lower() == "y"
-                if use_existing:
-                    # Skip capture and go straight to cracking with network details
-                    crack_password(cap_file, self.wordlist_path, target)
-                    _exit_program(self)
-                    return
             else:
-                colored_log(
-                    "info", f"No existing handshake file found for {target.essid}"
-                )
+                colored_log("warning", "No handshakes captured for cracking.")
 
-            # Proceed with capture if no existing file or user chooses "n"
-            handshake_path = capture_handshake(self, target)
-            if handshake_path:
-                crack_password(handshake_path, self.wordlist_path, target)
             _exit_program(self)
 
         except KeyboardInterrupt:
             colored_log("warning", "Program cancelled by user")
             _exit_program(self)
 
-
 if __name__ == "__main__":
     # Check root access
     if os.geteuid() != 0:
-        colored_log(
-            "error", "This program requires root access. Please run with 'sudo'"
-        )
+        colored_log("error", "This program requires root access. Please run with 'sudo'")
         sys.exit(1)
 
     # Check dependencies
@@ -131,10 +138,7 @@ if __name__ == "__main__":
 
     if missing:
         colored_log("error", f"Missing dependencies: {', '.join(missing)}")
-        colored_log(
-            "warning",
-            "Please install aircrack-ng suite: sudo apt-get install aircrack-ng",
-        )
+        colored_log("warning", "Please install aircrack-ng suite: sudo apt-get install aircrack-ng")
         sys.exit(1)
 
     try:
