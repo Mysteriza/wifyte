@@ -1,4 +1,3 @@
-![Visitor Count](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https://github.com/Mysteriza/wifyte&count_bg=%2379C83D&title_bg=%23555555&icon=github.svg&icon_color=%23E7E7E7&title=Visitors&edge_flat=false)
 ![Repository Size](https://img.shields.io/github/repo-size/Mysteriza/wifyte)
 ![Python Version](https://img.shields.io/badge/python-3.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
