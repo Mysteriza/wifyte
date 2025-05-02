@@ -2,7 +2,8 @@ import os
 import re
 import threading
 import time
-from utils import colored_log, execute_command, loading_spinner
+from utils import colored_log, execute_command, loading_spinner, sanitize_ssid
+from helpers import check_dependency
 from rich.console import Console
 
 # Rich console setup
@@ -12,13 +13,13 @@ console = Console()
 def crack_password(handshake_path: str, wordlist_path: str, network) -> str | None:
     """Crack password from handshake with validation and save results"""
     if not os.path.exists(handshake_path) or not os.path.exists(wordlist_path):
-        colored_log("error", "Handshake file or wordlist not found")
+        colored_log("error", "Handshake file or wordlist not found!")
         return None
 
     # Validate handshake before cracking
     if not _check_handshake(handshake_path):
         colored_log(
-            "warning", "Invalid or incomplete handshake detected. Skipping cracking"
+            "warning", "Invalid or incomplete handshake detected. Skipping cracking!"
         )
         return None
 
@@ -28,7 +29,7 @@ def crack_password(handshake_path: str, wordlist_path: str, network) -> str | No
     stop_event = threading.Event()
     animation_thread = threading.Thread(
         target=loading_spinner,
-        args=(stop_event, "Cracking password, this will take some time"),
+        args=(stop_event, "Cracking password, this will take some time!"),
     )
     animation_thread.daemon = True
     animation_thread.start()
@@ -42,7 +43,7 @@ def crack_password(handshake_path: str, wordlist_path: str, network) -> str | No
     animation_thread.join()
 
     if not result:
-        colored_log("error", "Error cracking password")
+        colored_log("error", "Error cracking password!")
         return None
 
     # Check results
@@ -67,9 +68,8 @@ def crack_password(handshake_path: str, wordlist_path: str, network) -> str | No
             # Save results to file
             results_dir = "results"
             os.makedirs(results_dir, exist_ok=True)
-            result_file = os.path.join(
-                results_dir, f"{network.essid.replace(' ', '_')}_result.txt"
-            )
+            safe_essid = sanitize_ssid(network.essid)
+            result_file = os.path.join(results_dir, f"{safe_essid}_result.txt")
             with open(result_file, "w") as f:
                 f.write(f"Network: {network.essid} ({network.bssid})\n")
                 f.write(f"Password: {password}\n")

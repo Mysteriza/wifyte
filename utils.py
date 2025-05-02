@@ -3,6 +3,8 @@ import subprocess
 import threading
 import time
 import sys
+import re
+import shutil
 from typing import Optional, List
 from rich.console import Console
 
@@ -13,7 +15,22 @@ console = Console()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("wifyte")
 
-# Log with rich styling
+
+def check_dependency(cmd: str) -> bool:
+    """Check if a CLI tool is available in system PATH"""
+    return shutil.which(cmd) is not None
+
+
+def sanitize_ssid(ssid: str) -> str:
+    """
+    Sanitize SSID to be safe for use as filename.
+    Removes invalid characters and trims whitespace.
+    """
+    # Remove forbidden characters for filenames across OSes
+    sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "", ssid)
+    return sanitized.strip()
+
+
 def colored_log(level: str, msg: str, enabled=True):
     """Log with rich styling to terminal"""
     if not enabled:
@@ -35,25 +52,37 @@ def colored_log(level: str, msg: str, enabled=True):
     prefix = prefix_map.get(level, "[*]")
     console.print(f"{prefix} {msg}", style=style)
 
-def execute_command(command, shell=False, capture_output=True) -> Optional[subprocess.CompletedProcess]:
+
+def execute_command(
+    command, shell=False, capture_output=True
+) -> Optional[subprocess.CompletedProcess]:
     """Run shell command with error handling"""
     try:
-        return subprocess.run(command, shell=shell, capture_output=capture_output, text=True)
+        return subprocess.run(
+            command, shell=shell, capture_output=capture_output, text=True
+        )
     except Exception as e:
         colored_log("error", f"Error executing command: {e}")
         return None
+
 
 def select_target(networks: List) -> Optional[List]:
     """Select one or multiple target networks with input validation"""
     while True:
         try:
-            console.print("[?] Select Targets (e.g., '1' or '1, 2, 5')(0 to exit): ", style="yellow bold", end="")
+            console.print(
+                "[?] Select Targets (e.g., '1' or '1, 2, 5')(0 to exit): ",
+                style="yellow bold",
+                end="",
+            )
             user_input = input().strip()
             if user_input == "0":
                 return None
-            
+
             # Parse input untuk multiple targets
-            target_ids = [int(i.strip()) - 1 for i in user_input.split(",") if i.strip().isdigit()]
+            target_ids = [
+                int(i.strip()) - 1 for i in user_input.split(",") if i.strip().isdigit()
+            ]
             if not target_ids:
                 colored_log("error", "Invalid input. Please enter valid network IDs.")
                 continue
@@ -64,16 +93,19 @@ def select_target(networks: List) -> Optional[List]:
                 if 0 <= idx < len(networks):
                     valid_targets.append(networks[idx])
                 else:
-                    colored_log("warning", f"Network ID {idx + 1} is out of range. Skipping.")
+                    colored_log(
+                        "warning", f"Network ID {idx + 1} is out of range. Skipping."
+                    )
 
             if not valid_targets:
                 colored_log("error", "No valid targets selected.")
                 continue
-            
+
             return valid_targets
         except (ValueError, KeyboardInterrupt):
-            colored_log("warning", "Invalid input or cancelled")
+            colored_log("warning", "Invalid input or cancelled!")
             return None
+
 
 def _display_banner():
     """Display program banner with rich"""
@@ -86,7 +118,10 @@ def _display_banner():
  ╚══╝╚══╝ ╚═╝╚═╝        ╚═╝      ╚═╝   ╚══════╝
     """
     console.print(banner, style="bright_cyan bold")
-    console.print("WiFi Handshake Capture & Cracking Tool", style="yellow", justify="left")
+    console.print(
+        "WiFi Handshake Capture & Cracking Tool", style="yellow", justify="left"
+    )
+
 
 def _exit_program(self):
     """Clean exit with rich"""
@@ -97,23 +132,35 @@ def _exit_program(self):
         disable_monitor = input().lower() == "y"
 
         if disable_monitor and self.monitor_interface:
-            toggle_monitor_mode(self, self.monitor_interface, enable=False)
+            success = toggle_monitor_mode(self.monitor_interface, enable=False)
+            if success:
+                colored_log("success", "Monitor mode disabled successfully.")
+            else:
+                colored_log("warning", "Failed to disable monitor mode cleanly.")
         elif self.monitor_interface:
-            colored_log("success", f"Monitor mode remains active on {self.monitor_interface}")
+            colored_log(
+                "success", f"Monitor mode remains active on {self.monitor_interface}"
+            )
 
-        colored_log("info", "Program closed, thank you")
+        colored_log("info", "Program closed, Thank You!")
     except KeyboardInterrupt:
-        colored_log("warning", "Program cancelled by user")
+        colored_log("warning", "Program cancelled by user!")
         if self.monitor_interface:
-            colored_log("success", f"Monitor mode remains active on {self.monitor_interface}")
+            colored_log(
+                "success", f"Monitor mode remains active on {self.monitor_interface}!"
+            )
 
-# Animation for loading spinner (modern Braille style with color)
+
 def loading_spinner(stop_event: threading.Event, message: str):
     """Display a modern spinning loader animation until stop_event is set"""
     spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     idx = 0
     while not stop_event.is_set():
-        console.print(f"[*] {message} {spinner[idx % len(spinner)]}", style="bright_cyan", end="\r")
+        console.print(
+            f"[*] {message} {spinner[idx % len(spinner)]}",
+            style="bright_cyan",
+            end="\r",
+        )
         sys.stdout.flush()
         time.sleep(0.1)
         idx += 1

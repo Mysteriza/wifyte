@@ -3,7 +3,8 @@ import time
 import signal
 import subprocess
 from dataclasses import dataclass
-from utils import colored_log
+from utils import colored_log, execute_command, sanitize_ssid
+from helpers import check_dependency
 from rich.console import Console
 from mac_vendor_lookup import MacLookup  # Library to find vendor from MAC addr
 
@@ -37,7 +38,12 @@ class WiFiNetwork:
 def scan_networks(self) -> list[WiFiNetwork]:
     """Scan available wifi networks, filtering out open networks and sorting by signal strength"""
     if not self.monitor_interface:
-        colored_log("error", "No monitor mode interface found")
+        colored_log("error", "No monitor mode interface found!")
+        return []
+
+    # Check dependencies
+    if not check_dependency("airodump-ng"):
+        colored_log("error", "airodump-ng is required for scanning!")
         return []
 
     colored_log("info", "Starting WiFi network scan...")
@@ -60,7 +66,7 @@ def scan_networks(self) -> list[WiFiNetwork]:
     try:
         time.sleep(8)
     except KeyboardInterrupt:
-        colored_log("warning", "Scanning stopped by user")
+        colored_log("warning", "Scanning stopped by user!")
     finally:
         proc.send_signal(signal.SIGTERM)
         proc.wait()
@@ -116,7 +122,7 @@ def scan_networks(self) -> list[WiFiNetwork]:
         except Exception as e:
             colored_log("error", f"Error reading scan results: {e}")
     else:
-        colored_log("error", "Scan results file not found")
+        colored_log("error", "Scan results file not found!")
 
     # Sort networks by signal strength (descending order)
     networks.sort(key=lambda x: x.power, reverse=True)
@@ -125,9 +131,9 @@ def scan_networks(self) -> list[WiFiNetwork]:
         network.id = i
 
     if networks:
-        colored_log("success", f"Found {len(networks)} encrypted or hidden networks")
+        colored_log("success", f"Found {len(networks)} encrypted or hidden networks.")
     else:
-        colored_log("warning", "No encrypted or hidden networks detected")
+        colored_log("warning", "No encrypted or hidden networks detected.")
 
     return networks
 
@@ -137,7 +143,12 @@ def decloak_ssid(self, network: WiFiNetwork) -> str | None:
     if network.essid != "<HIDDEN SSID>":
         return network.essid  # No need to decloak if SSID is already known
 
-    colored_log("info", f"Attempting to decloak hidden SSID for BSSID {network.bssid}")
+    # Check dependencies
+    if not check_dependency("aireplay-ng") or not check_dependency("airodump-ng"):
+        colored_log("error", "aireplay-ng and airodump-ng are required to decloak SSID!")
+        return None
+
+    colored_log("info", f"Attempting to decloak hidden SSID for BSSID {network.bssid}...")
     output_file = os.path.join(self.temp_dir, "decloak-01.csv")
 
     # Start airodump-ng to capture probe requests
@@ -167,12 +178,20 @@ def decloak_ssid(self, network: WiFiNetwork) -> str | None:
         network.bssid,
         self.monitor_interface,
     ]
-    subprocess.Popen(deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.Popen(
+            deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except FileNotFoundError:
+        colored_log(
+            "error", "aireplay-ng not found. Make sure aircrack-ng suite is installed."
+        )
+        return None
 
     try:
         time.sleep(10)  # Wait for clients to reconnect and send probe requests
     except KeyboardInterrupt:
-        colored_log("warning", "Decloaking stopped by user")
+        colored_log("warning", "Decloaking stopped by user!")
     finally:
         proc.send_signal(signal.SIGTERM)
         proc.wait()
@@ -195,17 +214,25 @@ def decloak_ssid(self, network: WiFiNetwork) -> str | None:
                     if len(parts) >= 14 and parts[0] == network.bssid:
                         essid = parts[13].strip().replace("\x00", "")
                         if essid and not essid.startswith("<length:"):
-                            colored_log("success", f"Hidden SSID decloaked: {essid}")
-                            return essid
+                            sanitized_essid = sanitize_ssid(essid)
+                            colored_log(
+                                "success", f"Hidden SSID decloaked: {sanitized_essid}"
+                            )
+                            return sanitized_essid
         except Exception as e:
             colored_log("error", f"Error reading decloak results: {e}")
 
-    colored_log("warning", f"Failed to decloak SSID for {network.bssid}")
+    colored_log("warning", f"Failed to decloak SSID for {network.bssid}!")
     return None
 
 
 def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
     """Detect connected clients to the target network"""
+    # Check dependencies
+    if not check_dependency("airodump-ng"):
+        colored_log("error", "airodump-ng is required for detecting clients!")
+        return []
+
     colored_log("info", f"Detecting connected clients for {network.essid}...")
     output_file = os.path.join(self.temp_dir, "clients-01.csv")
 
@@ -228,7 +255,7 @@ def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
     try:
         time.sleep(10)
     except KeyboardInterrupt:
-        colored_log("warning", "Client detection stopped by user")
+        colored_log("warning", "Client detection stopped by user!")
     finally:
         proc.send_signal(signal.SIGTERM)
         proc.wait()
@@ -251,13 +278,13 @@ def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
                     if len(parts) >= 6 and parts[0].strip():
                         clients.append(parts[0])
         except Exception as e:
-            colored_log("error", f"Error reading client detection results: {e}")
+            colored_log("error", f"Error reading client detection results: {e}!")
     else:
-        colored_log("error", "Client detection results file not found")
+        colored_log("error", "Client detection results file not found!")
 
     if clients:
-        colored_log("success", f"Detected {len(clients)} connected clients")
+        colored_log("success", f"Detected {len(clients)} connected clients!")
     else:
-        colored_log("warning", "No connected clients detected")
+        colored_log("warning", "No connected clients detected!")
 
     return clients
