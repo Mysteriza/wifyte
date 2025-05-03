@@ -141,14 +141,18 @@ def scan_networks(self) -> list[WiFiNetwork]:
 def decloak_ssid(self, network: WiFiNetwork) -> str | None:
     """Decloak a hidden SSID by capturing probe requests after deauthentication"""
     if network.essid != "<HIDDEN SSID>":
-        return network.essid  # No need to decloak if SSID is already known
+        return network.essid  # No need to decloak if already known
 
     # Check dependencies
     if not check_dependency("aireplay-ng") or not check_dependency("airodump-ng"):
-        colored_log("error", "aireplay-ng and airodump-ng are required to decloak SSID!")
+        colored_log(
+            "error", "aireplay-ng and airodump-ng are required to decloak SSID!"
+        )
         return None
 
-    colored_log("info", f"Attempting to decloak hidden SSID for BSSID {network.bssid}...")
+    colored_log(
+        "info", f"Attempting to decloak hidden SSID for BSSID {network.bssid}..."
+    )
     output_file = os.path.join(self.temp_dir, "decloak-01.csv")
 
     # Start airodump-ng to capture probe requests
@@ -234,6 +238,7 @@ def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
         return []
 
     colored_log("info", f"Detecting connected clients for {network.essid}...")
+
     output_file = os.path.join(self.temp_dir, "clients-01.csv")
 
     # Start airodump-ng to detect clients
@@ -285,6 +290,6 @@ def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
     if clients:
         colored_log("success", f"Detected {len(clients)} connected clients!")
     else:
-        colored_log("warning", "No connected clients detected!")
+        colored_log("warning", "No connected clients detected.")
 
     return clients

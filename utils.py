@@ -5,6 +5,7 @@ import time
 import sys
 import re
 import shutil
+import os
 from typing import Optional, List
 from rich.console import Console
 
@@ -14,6 +15,71 @@ console = Console()
 # Logging configuration for terminal only
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("wifyte")
+
+# Global vendor map loaded from manuf file
+VENDOR_MAP = {}
+
+
+def load_manuf_file(manuf_path: str = "manuf"):
+    """Load MAC address prefix to vendor mapping from local manuf file"""
+    global VENDOR_MAP
+    VENDOR_MAP = {}
+
+    if not os.path.exists(manuf_path):
+        console.print(
+            "[!] 'manuf' file not found. Vendor lookup will be disabled.",
+            style="yellow",
+        )
+        return
+
+    try:
+        with open(manuf_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                parts = line.split(None, 2)  # Split into up to 3 parts
+                if len(parts) < 2:
+                    continue
+
+                mac_prefix = parts[0].upper()
+                vendor_name = parts[2] if len(parts) == 3 else parts[1]
+
+                # Handle special prefixes like '/36'
+                if "/" in mac_prefix:
+                    base_mask = mac_prefix.split("/")[0]
+                    octets = base_mask.replace("-", ":").split(":")
+                else:
+                    octets = mac_prefix.replace("-", ":").split(":")
+
+                if len(octets) >= 3:
+                    normalized = ":".join(octets[:3])  # First 3 octets only
+                    VENDOR_MAP[normalized] = vendor_name
+    except Exception as e:
+        console.print(f"[!] Error loading manuf file: {e}", style="red")
+
+
+# Load vendor map at startup
+load_manuf_file()
+
+
+def lookup_vendor(mac: str) -> str:
+    """
+    Look up vendor using local manuf file only.
+    Returns 'Unknown' if no match is found.
+    """
+    if ":" not in mac:
+        return "Unknown"
+
+    # Normalize MAC
+    normalized = re.sub(r"[^A-Z0-9]", ":", mac.upper())
+    octets = normalized.split(":")
+    if len(octets) < 3:
+        return "Unknown"
+
+    prefix = ":".join(octets[:3])
+    return VENDOR_MAP.get(prefix, "Unknown")
 
 
 def check_dependency(cmd: str) -> bool:
@@ -26,7 +92,6 @@ def sanitize_ssid(ssid: str) -> str:
     Sanitize SSID to be safe for use as filename.
     Removes invalid characters and trims whitespace.
     """
-    # Remove forbidden characters for filenames across OSes
     sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "", ssid)
     return sanitized.strip()
 
@@ -37,10 +102,10 @@ def colored_log(level: str, msg: str, enabled=True):
         return
 
     style_map = {
-        "info": "bright_cyan",  # Brighter cyan for info
-        "success": "green bold",  # Kept as requested
-        "warning": "yellow",  # Kept as requested
-        "error": "bright_red",  # Brighter red for error
+        "info": "bright_cyan",
+        "success": "green bold",
+        "warning": "yellow",
+        "error": "bright_red",
     }
     prefix_map = {
         "info": "[*]",
@@ -48,6 +113,7 @@ def colored_log(level: str, msg: str, enabled=True):
         "warning": "[!]",
         "error": "[!]",
     }
+
     style = style_map.get(level, "white")
     prefix = prefix_map.get(level, "[*]")
     console.print(f"{prefix} {msg}", style=style)
@@ -79,7 +145,6 @@ def select_target(networks: List) -> Optional[List]:
             if user_input == "0":
                 return None
 
-            # Parse input untuk multiple targets
             target_ids = [
                 int(i.strip()) - 1 for i in user_input.split(",") if i.strip().isdigit()
             ]
@@ -87,7 +152,6 @@ def select_target(networks: List) -> Optional[List]:
                 colored_log("error", "Invalid input. Please enter valid network IDs.")
                 continue
 
-            # Validasi dan kumpulkan target
             valid_targets = []
             for idx in target_ids:
                 if 0 <= idx < len(networks):
@@ -116,7 +180,7 @@ def _display_banner():
 ██║███╗██║██║██╔══╝    ╚██╔╝     ██║   ██╔══╝  
 ╚███╔███╔╝██║██║        ██║      ██║   ███████╗
  ╚══╝╚══╝ ╚═╝╚═╝        ╚═╝      ╚═╝   ╚══════╝
-    """
+"""
     console.print(banner, style="bright_cyan bold")
     console.print(
         "WiFi Handshake Capture & Cracking Tool", style="yellow", justify="left"
@@ -162,7 +226,7 @@ def loading_spinner(stop_event: threading.Event, message: str):
             end="\r",
         )
         sys.stdout.flush()
-        time.sleep(0.1)
         idx += 1
+        time.sleep(0.1)
     console.print(f"{' ' * (len(message) + 10)}", end="\r\n")
     sys.stdout.flush()

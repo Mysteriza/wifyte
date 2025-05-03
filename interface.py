@@ -1,38 +1,44 @@
 import sys
 import re
 import subprocess
-from utils import execute_command, colored_log
-from mac_vendor_lookup import MacLookup
+from utils import execute_command, colored_log, lookup_vendor
+from rich.console import Console
+
+# Rich console setup
+console = Console()
 
 
 def get_interface_info(interface: str) -> dict:
     """Get detailed info about a WiFi interface"""
-    result = execute_command(["iwconfig", interface])
+    result = execute_command(["ip", "link", "show", interface])
     if not result:
         return {
             "name": interface,
             "mac": "Unknown",
-            "vendor": "Unknown",
-            "is_internal": None,
+            "driver": "Unknown",
             "likely_external": False,
         }
 
-    mac_match = re.search(r"HWaddr\s([0-9A-Fa-f:]{17})", result.stdout)
-    mac = mac_match.group(1) if mac_match else "Unknown"
+    # Extract MAC address
+    mac_match = re.search(r"link/ether ([0-9A-Fa-f:]{17})", result.stdout)
+    mac = mac_match.group(1).upper() if mac_match else "Unknown"
 
-    try:
-        vendor = MacLookup().lookup(mac) if mac != "Unknown" else "Unknown"
-    except Exception:
-        vendor = "Unknown"
+    # Get driver info
+    phy_result = execute_command(["ethtool", "-i", interface])
+    driver = "Unknown"
+    if phy_result and "driver:" in phy_result.stdout:
+        driver_match = re.search(r"driver:\s*(\S+)", phy_result.stdout)
+        if driver_match:
+            driver = driver_match.group(1)
 
-    is_internal = interface.startswith("wl") and not interface.startswith("wlx")
-    likely_external = interface.startswith("wlx") or "phy" in result.stdout
+    # Detect internal vs external based on name
+    likely_external = interface.startswith("wlx") or interface.startswith("usb")
+    is_internal = interface.startswith("wl") and not likely_external
 
     return {
         "name": interface,
         "mac": mac,
-        "vendor": vendor,
-        "is_internal": is_internal,
+        "driver": driver,
         "likely_external": likely_external,
     }
 
@@ -49,6 +55,50 @@ def find_wifi_interfaces() -> list[dict]:
     ]
 
     return [get_interface_info(iface) for iface in raw_interfaces]
+
+
+def select_interface() -> str:
+    """Prompt user to select a WiFi interface with extended info"""
+    interfaces = find_wifi_interfaces()
+    if not interfaces:
+        colored_log("error", "No WiFi interfaces found!")
+        sys.exit(1)
+
+    console = Console()
+
+    console.print("[*] Available WiFi Interfaces:", style="bright_cyan")
+    for idx, intf in enumerate(interfaces):
+        name = intf["name"]
+        mac = intf["mac"]
+        driver = intf["driver"]
+        type_str = "External" if intf["likely_external"] else "Internal"
+        warning = (
+            "⚠️ Likely unsupported!"
+            if not intf["likely_external"] and not intf.get("is_internal", False)
+            else ""
+        )
+
+        console.print(f"  [{idx + 1}] {name} ({type_str})")
+        console.print(f"      - MAC: {mac}")
+        console.print(f"      - Driver: {driver}")
+        if warning:
+            console.print(f"      {warning}", style="yellow")
+
+    console.print(
+        "[?] Select the interface you want to use: ", end="", style="yellow bold"
+    )
+
+    while True:
+        try:
+            choice = int(input()) - 1
+            if 0 <= choice < len(interfaces):
+                selected_intf = interfaces[choice]["name"]
+                colored_log("info", f"Selected interface: {selected_intf}")
+                return selected_intf
+            else:
+                raise ValueError
+        except ValueError:
+            print("[!] Invalid selection. Please enter a valid number: ", end="")
 
 
 def toggle_monitor_mode(interface: str, enable=True) -> str | bool | None:
@@ -98,50 +148,6 @@ def toggle_monitor_mode(interface: str, enable=True) -> str | bool | None:
         execute_command(["service", "NetworkManager", "restart"], capture_output=False)
         colored_log("success", "Monitor mode disabled and NetworkManager restarted.")
         return True
-
-
-def select_interface() -> str:
-    """Prompt user to select a WiFi interface with detailed info"""
-    interfaces = find_wifi_interfaces()
-    if not interfaces:
-        colored_log("error", "No WiFi interfaces found!")
-        sys.exit(1)
-
-    from rich.console import Console
-
-    console = Console()
-
-    console.print("[*] Available WiFi Interfaces:", style="bright_cyan")
-    for idx, intf in enumerate(interfaces):
-        name = intf["name"]
-        mac = intf["mac"]
-        vendor = intf["vendor"]
-        type_str = "External" if intf["likely_external"] else "Internal"
-        warning = (
-            "⚠️ Likely unsupported"
-            if not intf["likely_external"] and not intf["is_internal"]
-            else ""
-        )
-
-        console.print(f"  [{idx + 1}] {name} ({type_str})")
-        console.print(f"      - MAC: {mac}")
-        console.print(f"      - Vendor: {vendor} {warning}")
-
-    console.print(
-        "[?] Select the interface you want to use: ", end="", style="yellow bold"
-    )
-
-    while True:
-        try:
-            choice = int(input()) - 1
-            if 0 <= choice < len(interfaces):
-                selected_intf = interfaces[choice]["name"]
-                colored_log("info", f"Selected interface: {selected_intf}")
-                return selected_intf
-            else:
-                raise ValueError
-        except ValueError:
-            print("[!] Invalid selection. Please enter a valid number: ", end="")
 
 
 def setup_interface(self):
