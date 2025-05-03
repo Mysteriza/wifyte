@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import sys
 import tempfile
@@ -33,17 +34,32 @@ class Wifyte:
         self.stop_capture = False
         self.handshake_found = False
 
-        # Create handshake directory if it doesn't exist
-        os.makedirs(self.handshake_dir, exist_ok=True)
+        # Parse command-line arguments
+        parser = argparse.ArgumentParser(
+            description="WiFi Handshake Capture & Cracking Tool"
+        )
+        parser.add_argument(
+            "--wordlist", "-w", type=str, help="Path to custom wordlist file"
+        )
+        args = parser.parse_args()
 
         # Setup default wordlist
-        self.wordlist_path = os.path.join(os.getcwd(), "wifyte.txt")
-        if not os.path.exists(self.wordlist_path):
-            colored_log("warning", f"Wordlist not found in {self.wordlist_path}")
-            colored_log("warning", "Creating default wordlist")
-            with open(self.wordlist_path, "w") as f:
-                f.write("password\n12345678\nqwerty123\nadmin123\nwifi12345\n")
-            colored_log("success", "Default wordlist created")
+        if args.wordlist:
+            self.wordlist_path = os.path.abspath(args.wordlist)
+            if not os.path.exists(self.wordlist_path):
+                colored_log(
+                    "error", f"Custom wordlist not found at {self.wordlist_path}"
+                )
+                sys.exit(1)
+            colored_log("success", f"Using custom wordlist: {self.wordlist_path}")
+        else:
+            self.wordlist_path = os.path.join(os.getcwd(), "wifyte.txt")
+            if not os.path.exists(self.wordlist_path):
+                colored_log("warning", f"Wordlist not found in {self.wordlist_path}")
+                colored_log("warning", "Creating default wordlist...")
+                with open(self.wordlist_path, "w") as f:
+                    f.write("password\n12345678\nqwerty123\nadmin123\nwifi12345\n")
+                colored_log("success", "Default wordlist created!")
 
     def __del__(self):
         try:
