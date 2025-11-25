@@ -7,7 +7,7 @@ import shutil
 import signal
 import atexit
 from interface import setup_interface, toggle_monitor_mode
-from scanner import scan_networks, decloak_ssid
+from scanner import scan_networks_continuous, decloak_ssid
 from capture import capture_handshake
 from cracker import crack_password
 from utils import (
@@ -42,15 +42,28 @@ class CleanupManager:
         self.interface_info = interface_info
         
         if not self.cleanup_registered:
-            # Register signal handlers for Ctrl+C and termination
-            signal.signal(signal.SIGINT, self._signal_handler)
-            signal.signal(signal.SIGTERM, self._signal_handler)
+            # Store original handlers
+            self.original_sigint_handler = signal.signal(signal.SIGINT, self._signal_handler)
+            self.original_sigterm_handler = signal.signal(signal.SIGTERM, self._signal_handler)
             
             # Register atexit handler for crashes/unexpected exits
             atexit.register(self._atexit_cleanup)
             
             self.cleanup_registered = True
             colored_log("info", "Safety cleanup handler registered successfully")
+    
+    def pause_signal_handlers(self):
+        """Temporarily disable signal handlers (for continuous scanning)"""
+        if self.cleanup_registered:
+            # Restore to default handlers
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    
+    def resume_signal_handlers(self):
+        """Re-enable signal handlers after scanning"""
+        if self.cleanup_registered:
+            signal.signal(signal.SIGINT, self._signal_handler)
+            signal.signal(signal.SIGTERM, self._signal_handler)
     
     def _signal_handler(self, signum, frame):
         """Handle SIGINT (Ctrl+C) and SIGTERM"""
@@ -169,20 +182,24 @@ class Wifyte:
                 self.interface_info
             )
             
-            self.networks = scan_networks(self)
+            # Temporarily pause signal handlers for continuous scanning
+            # (Ctrl+C should stop scan, not exit program)
+            self.cleanup_manager.pause_signal_handlers()
+            
+            try:
+                self.networks = scan_networks_continuous(self)
+            finally:
+                # Resume signal handlers after scan
+                self.cleanup_manager.resume_signal_handlers()
+
 
             if not self.networks:
                 colored_log("error", "No networks found!")
                 _exit_program(self)
                 return
 
-            # Display networks
-            console.print(
-                f"\n===== {len(self.networks)} Networks found =====",
-                style="bright_cyan",
-            )
-            for network in self.networks:
-                console.print(str(network))
+            # No need to display networks again - already shown in live table
+            # Jump straight to target selection
 
             # Select target(s)
             targets = select_target(self.networks)

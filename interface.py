@@ -1,6 +1,7 @@
 import sys
 import re
 import subprocess
+import os
 from utils import execute_command, colored_log, lookup_vendor
 from rich.console import Console
 
@@ -8,8 +9,54 @@ from rich.console import Console
 console = Console()
 
 
+def _detect_vm_environment() -> bool:
+    """Detect if running in a virtual machine (strict detection to avoid false positives)"""
+    vm_indicators = {
+        "virtualbox": ["virtualbox", "vbox", "oracle"],
+        "vmware": ["vmware", "vmw"],
+        "qemu": ["qemu", "bochs"],
+        "kvm": ["kvm"],
+        "xen": ["xen"],
+        "hyperv": ["microsoft corporation", "hyper-v"],
+        "parallels": ["parallels"]
+    }
+    
+    vm_detected = False
+    
+    try:
+        # Method 1: Check DMI files (require exact matches, not substrings)
+        dmi_files = [
+            "/sys/class/dmi/id/product_name",
+            "/sys/class/dmi/id/sys_vendor",
+            "/sys/class/dmi/id/bios_vendor"
+        ]
+        
+        for dmi_file in dmi_files:
+            if os.path.exists(dmi_file):
+                try:
+                    with open(dmi_file, 'r') as f:
+                        content = f.read().strip().lower()
+                        # Require stronger match - full word matches
+                        for vm_type, keywords in vm_indicators.items():
+                            for keyword in keywords:
+                                if keyword in content and len(content) < 50:  # Avoid false positives from long strings
+                                    vm_detected = True
+                                    break
+                            if vm_detected:
+                                break
+                except:
+                    pass
+            if vm_detected:
+                break
+                    
+    except Exception:
+        pass
+    
+    return vm_detected
+
+
 def get_interface_info(interface: str) -> dict:
-    """Get detailed info about a WiFi interface"""
+    """Get detailed info about a WiFi interface with smart USB and VM detection"""
     result = execute_command(["ip", "link", "show", interface])
     if not result:
         return {
@@ -17,6 +64,7 @@ def get_interface_info(interface: str) -> dict:
             "mac": "Unknown",
             "driver": "Unknown",
             "likely_external": False,
+            "in_vm": False,
         }
 
     # Extract MAC address
@@ -31,15 +79,42 @@ def get_interface_info(interface: str) -> dict:
         if driver_match:
             driver = driver_match.group(1)
 
-    # Detect internal vs external based on name
-    likely_external = interface.startswith("wlx") or interface.startswith("usb")
-    is_internal = interface.startswith("wl") and not likely_external
+    # ENHANCED DETECTION: Multiple methods
+    likely_external = False
+    
+    # Method 1: Name-based detection (existing)
+    if interface.startswith("wlx") or interface.startswith("usb"):
+        likely_external = True
+    
+    # Method 2: USB detection via sysfs
+    if not likely_external:
+        try:
+            # Check if connected via USB bus
+            usb_path = f"/sys/class/net/{interface}/device/uevent"
+            if os.path.exists(usb_path):
+                with open(usb_path, 'r') as f:
+                    content = f.read().lower()
+                    if 'usb' in content:
+                        likely_external = True
+                        
+            # Alternative: check device path
+            device_path = f"/sys/class/net/{interface}/device"
+            if os.path.exists(device_path):
+                real_path = os.path.realpath(device_path)
+                if '/usb' in real_path.lower():
+                    likely_external = True
+        except Exception:
+            pass
+    
+    # Method 3: VM environment detection
+    in_vm = _detect_vm_environment()
 
     return {
         "name": interface,
         "mac": mac,
         "driver": driver,
         "likely_external": likely_external,
+        "in_vm": in_vm,
     }
 
 
@@ -77,8 +152,11 @@ def select_interface() -> tuple[str, dict]:
             if not intf["likely_external"] and not intf.get("is_internal", False)
             else ""
         )
+        
+        # Show VM indicator if detected
+        vm_indicator = " [VM Detected]" if intf.get("in_vm") else ""
 
-        console.print(f"  [{idx + 1}] {name} ({type_str})")
+        console.print(f"  [{idx + 1}] {name} ({type_str}{vm_indicator})")
         console.print(f"      - MAC: {mac}")
         console.print(f"      - Driver: {driver}")
         if warning:
@@ -95,6 +173,25 @@ def select_interface() -> tuple[str, dict]:
                 selected_info = interfaces[choice]
                 selected_intf = selected_info["name"]
                 colored_log("info", f"Selected interface: {selected_intf}")
+                
+                # SMART PROMPT: If single adapter in VM or uncertain detection
+                if len(interfaces) == 1:
+                    intf_info = interfaces[0]
+                    # Ask user if in VM or if detection is uncertain
+                    if intf_info['in_vm'] or not intf_info['likely_external']:
+                        console.print(
+                            "\n[?] Is this an external USB Wi-Fi adapter? (y/n)",
+                            style="yellow bold",
+                            end=": "
+                        )
+                        is_external_input = input().lower()
+                        if is_external_input == 'y':
+                            selected_info['likely_external'] = True
+                            colored_log("info", "Adapter marked as external (NetworkManager will stay active)")
+                        elif is_external_input == 'n':
+                            selected_info['likely_external'] = False
+                            colored_log("warning", "Adapter marked as internal (NetworkManager will be stopped)")
+                
                 return selected_intf, selected_info
             else:
                 raise ValueError
