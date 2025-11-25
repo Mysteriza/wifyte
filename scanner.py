@@ -162,6 +162,7 @@ def scan_networks_continuous(self) -> list[WiFiNetwork]:
         table.add_column("CH", style="yellow", width=3)
         table.add_column("PWR", style="magenta", width=6)
         table.add_column("ENC", style="yellow", width=20)
+        table.add_column("VENDOR", style="cyan", width=20)
         
         display_nets = networks[:25] if len(networks) > 25 else networks
         
@@ -169,13 +170,21 @@ def scan_networks_continuous(self) -> list[WiFiNetwork]:
             signal_percent = max(0, min(100, int((net.power + 100) * 1.42857)))
             pwr_color = "bright_green" if signal_percent > 60 else "yellow" if signal_percent > 30 else "red"
             
+            # Safe vendor lookup
+            try:
+                vendor = mac_lookup.lookup(net.bssid)
+                vendor = vendor[:18] if len(vendor) > 18 else vendor
+            except Exception:
+                vendor = "Unknown"
+            
             table.add_row(
                 str(net.id),
                 net.essid[:23] if len(net.essid) > 23 else net.essid,
                 net.bssid,
                 str(net.channel),
                 f"[{pwr_color}]{signal_percent}%[/{pwr_color}]",
-                net.encryption[:18] if len(net.encryption) > 18 else net.encryption
+                net.encryption[:18] if len(net.encryption) > 18 else net.encryption,
+                vendor
             )
         
         footer_text = ""
@@ -433,37 +442,54 @@ def decloak_ssid(self, network: WiFiNetwork) -> str | None:
     return None
 
 
-def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
+def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> list[str]:
     """Detect connected clients to the target network"""
     # Check dependencies
     if not check_dependency("airodump-ng"):
-        colored_log("error", "airodump-ng is required for detecting clients!")
+        colored_log("error", "airodump-ng is required!")
         return []
 
-    colored_log("info", f"Detecting connected clients for {network.essid}...")
+    output_file = os.path.join(self.temp_dir, "client-scan")
 
-    output_file = os.path.join(self.temp_dir, "clients-01.csv")
+    # Clean up old files
+    for ext in ["-01.csv", "-01.cap", "-01.kismet.csv", "-01.kismet.netxml", "-01.log.csv"]:
+        old_file = output_file + ext
+        if os.path.exists(old_file):
+            os.remove(old_file)
 
-    # Start airodump-ng to detect clients
+    # Start airodump-ng in background
     proc = subprocess.Popen(
         [
             "airodump-ng",
-            "--bssid",
-            network.bssid,
-            "--channel",
-            str(network.channel),
-            "--write",
-            os.path.join(self.temp_dir, "clients"),
+            "--bssid", network.bssid,
+            "--channel", str(network.channel),
+            "--write", output_file,
+            "--output-format", "csv",
             self.monitor_interface,
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
 
+    # Show progress countdown with Rich
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
+    
     try:
-        time.sleep(10)
-    except KeyboardInterrupt:
-        colored_log("warning", "Client detection stopped by user!")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TimeRemainingColumn(),
+            console=console
+        ) as progress:
+            scan_task = progress.add_task(
+                f"Scanning for clients on {network.essid}",
+                total=duration
+            )
+            
+            for i in range(duration):
+                time.sleep(1)
+                progress.update(scan_task, advance=1)
     finally:
         proc.send_signal(signal.SIGTERM)
         proc.wait()
@@ -471,9 +497,10 @@ def detect_connected_clients(self, network: WiFiNetwork) -> list[str]:
     clients = []
 
     # Parse client results
-    if os.path.exists(output_file):
+    csv_file = f"{output_file}-01.csv"
+    if os.path.exists(csv_file):
         try:
-            with open(output_file, "r", encoding="utf-8", errors="replace") as f:
+            with open(csv_file, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
             client_section = False
