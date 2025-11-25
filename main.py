@@ -31,6 +31,7 @@ class Wifyte:
         self.networks = []
         self.temp_dir = tempfile.mkdtemp()
         self.handshake_dir = os.path.join(os.getcwd(), "handshakes")
+        os.makedirs(self.handshake_dir, exist_ok=True)
         self.stop_capture = False
         self.handshake_found = False
 
