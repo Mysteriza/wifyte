@@ -57,7 +57,7 @@ def find_wifi_interfaces() -> list[dict]:
     return [get_interface_info(iface) for iface in raw_interfaces]
 
 
-def select_interface() -> str:
+def select_interface() -> tuple[str, dict]:
     """Prompt user to select a WiFi interface with extended info"""
     interfaces = find_wifi_interfaces()
     if not interfaces:
@@ -92,20 +92,31 @@ def select_interface() -> str:
         try:
             choice = int(input()) - 1
             if 0 <= choice < len(interfaces):
-                selected_intf = interfaces[choice]["name"]
+                selected_info = interfaces[choice]
+                selected_intf = selected_info["name"]
                 colored_log("info", f"Selected interface: {selected_intf}")
-                return selected_intf
+                return selected_intf, selected_info
             else:
                 raise ValueError
         except ValueError:
             print("[!] Invalid selection. Please enter a valid number: ", end="")
 
 
-def toggle_monitor_mode(interface: str, enable=True) -> str | bool | None:
-    """Toggle monitor mode on/off for a specific interface"""
+def toggle_monitor_mode(interface: str, enable=True, interface_info: dict = None) -> str | bool | None:
+    """Toggle monitor mode with smart interface isolation"""
     if enable:
-        # Kill interfering processes
-        execute_command(["airmon-ng", "check", "kill"])
+        # SMART DECISION: Only kill NetworkManager if using internal adapter
+        is_external = interface_info and interface_info.get('likely_external', False)
+        
+        if not is_external:
+            # Internal adapter: need to kill NetworkManager
+            colored_log("warning", "Using internal adapter - NetworkManager will be stopped")
+            execute_command(["airmon-ng", "check", "kill"])
+        else:
+            # External adapter: keep NetworkManager running
+            colored_log("success", "Using external adapter - keeping NetworkManager active for internet!")
+            # Only check for interfering processes, don't kill NetworkManager
+            execute_command(["airmon-ng", "check"])
 
         # Turn off interface and enable monitor mode
         execute_command(["ifconfig", interface, "down"])
@@ -144,16 +155,21 @@ def toggle_monitor_mode(interface: str, enable=True) -> str | bool | None:
             colored_log("error", "Failed to disable monitor mode!")
             return False
 
-        # Restart network services
-        execute_command(["service", "NetworkManager", "restart"], capture_output=False)
-        colored_log("success", "Monitor mode disabled and NetworkManager restarted.")
+        # Only restart NetworkManager if we killed it (internal adapter)
+        is_external = interface_info and interface_info.get('likely_external', False)
+        if not is_external:
+            execute_command(["service", "NetworkManager", "restart"], capture_output=False)
+            colored_log("success", "Monitor mode disabled and NetworkManager restarted.")
+        else:
+            colored_log("success", "Monitor mode disabled (NetworkManager was not stopped).")
+        
         return True
 
 
 def setup_interface(self):
-    """Setup wifi interface for scanning by selecting one manually first"""
+    """Setup wifi interface for scanning with smart isolation"""
     colored_log("info", "Searching for wifi interfaces...")
-    self.interface = select_interface()
+    self.interface, self.interface_info = select_interface()
 
     # Check if already in monitor mode
     output = execute_command(["iwconfig", self.interface]).stdout
@@ -162,9 +178,13 @@ def setup_interface(self):
         self.monitor_interface = self.interface
         return
 
-    # Enable monitor mode
+    # Enable monitor mode with interface info for smart isolation
     colored_log("info", f"Activating monitor mode on {self.interface}...")
-    self.monitor_interface = toggle_monitor_mode(self.interface, enable=True)
+    self.monitor_interface = toggle_monitor_mode(
+        self.interface, 
+        enable=True,
+        interface_info=self.interface_info
+    )
 
     if not self.monitor_interface:
         colored_log("error", "Failed to enable monitor mode!")

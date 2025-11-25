@@ -2,8 +2,14 @@ import os
 import re
 import threading
 import time
-from utils import colored_log, execute_command, loading_spinner, sanitize_ssid
-from helpers import check_dependency
+from utils import (
+    colored_log,
+    execute_command,
+    loading_spinner,
+    sanitize_ssid,
+    check_handshake,
+    check_dependency,
+)
 from rich.console import Console
 
 # Rich console setup
@@ -17,7 +23,7 @@ def crack_password(handshake_path: str, wordlist_path: str, network) -> str | No
         return None
 
     # Validate handshake before cracking
-    if not _check_handshake(handshake_path):
+    if not check_handshake(handshake_path):
         colored_log(
             "warning", "Invalid or incomplete handshake detected. Skipping cracking!"
         )
@@ -82,11 +88,3 @@ def crack_password(handshake_path: str, wordlist_path: str, network) -> str | No
 
     colored_log("error", "Password not found in wordlist! Better luck next time!")
     return None
-
-
-def _check_handshake(cap_file: str) -> bool:
-    """Check if capture file contains a valid handshake"""
-    if not os.path.exists(cap_file):
-        return False
-    result = execute_command(["aircrack-ng", cap_file])
-    return result and "1 handshake" in result.stdout

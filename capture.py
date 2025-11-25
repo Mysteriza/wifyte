@@ -6,7 +6,7 @@ import subprocess
 import threading
 import shutil
 from datetime import datetime
-from utils import colored_log, execute_command, sanitize_ssid
+from utils import colored_log, execute_command, sanitize_ssid, check_handshake
 from scanner import detect_connected_clients
 from rich.console import Console
 
@@ -82,7 +82,7 @@ def capture_handshake(self, network) -> str | None:
             sys.stdout.flush()
 
             # Check for handshake directly in main thread
-            if os.path.exists(cap_file) and _check_handshake(self, cap_file):
+            if os.path.exists(cap_file) and check_handshake(cap_file):
                 console.print(f"{' ' * 80}", end="\r")  # Clear line
                 sys.stdout.flush()
                 colored_log("success", "Handshake detected!")
@@ -102,7 +102,7 @@ def capture_handshake(self, network) -> str | None:
         capture_proc.send_signal(signal.SIGTERM)
         capture_proc.wait()
 
-    if not os.path.exists(cap_file) or not _check_handshake(self, cap_file):
+    if not os.path.exists(cap_file) or not check_handshake(cap_file):
         colored_log("error", "Failed to capture handshake after deauthentication!")
         return None
 
@@ -177,11 +177,3 @@ def deauthenticate_clients(self, network, clients: list[str]):
     colored_log(
         "success", "Deauthentication process initiated for all connected clients!"
     )
-
-
-def _check_handshake(self, cap_file: str) -> bool:
-    """Check if capture file contains a handshake"""
-    if not os.path.exists(cap_file):
-        return False
-    result = execute_command(["aircrack-ng", cap_file])
-    return result and "1 handshake" in result.stdout

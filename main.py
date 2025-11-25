@@ -4,7 +4,9 @@ import os
 import sys
 import tempfile
 import shutil
-from interface import setup_interface
+import signal
+import atexit
+from interface import setup_interface, toggle_monitor_mode
 from scanner import scan_networks, decloak_ssid
 from capture import capture_handshake
 from cracker import crack_password
@@ -15,18 +17,100 @@ from utils import (
     _display_banner,
     _exit_program,
     sanitize_ssid,
+    check_dependency,
 )
-from helpers import check_dependency
-from mac_vendor_lookup import MacLookup
 from rich.console import Console
 
 # Rich console setup
 console = Console()
 
 
+class CleanupManager:
+    """Manages cleanup operations to ensure safe exit in all scenarios"""
+    
+    def __init__(self):
+        self.monitor_interface = None
+        self.original_interface = None
+        self.interface_info = None
+        self.cleanup_registered = False
+        self.cleanup_done = False
+        
+    def register(self, original_interface, monitor_interface, interface_info):
+        """Register interfaces for cleanup"""
+        self.original_interface = original_interface
+        self.monitor_interface = monitor_interface
+        self.interface_info = interface_info
+        
+        if not self.cleanup_registered:
+            # Register signal handlers for Ctrl+C and termination
+            signal.signal(signal.SIGINT, self._signal_handler)
+            signal.signal(signal.SIGTERM, self._signal_handler)
+            
+            # Register atexit handler for crashes/unexpected exits
+            atexit.register(self._atexit_cleanup)
+            
+            self.cleanup_registered = True
+            colored_log("info", "Safety cleanup handler registered successfully")
+    
+    def _signal_handler(self, signum, frame):
+        """Handle SIGINT (Ctrl+C) and SIGTERM"""
+        signal_name = "SIGINT (Ctrl+C)" if signum == signal.SIGINT else "SIGTERM"
+        colored_log("warning", f"\n{signal_name} received - cleaning up safely...")
+        self._cleanup()
+        colored_log("info", "Cleanup completed. Exiting...")
+        sys.exit(0)
+    
+    def _atexit_cleanup(self):
+        """Cleanup called by atexit on program termination"""
+        if not self.cleanup_done:
+            self._cleanup()
+    
+    def _cleanup(self):
+        """Perform actual cleanup operations"""
+        if self.cleanup_done or not self.monitor_interface:
+            return
+        
+        self.cleanup_done = True
+        
+        try:
+            colored_log("info", "Disabling monitor mode and restoring network...")
+            
+            success = toggle_monitor_mode(
+                self.monitor_interface,
+                enable=False,
+                interface_info=self.interface_info
+            )
+            
+            if success:
+                colored_log("success", "Network interfaces restored successfully!")
+            else:
+                # Only restart NetworkManager for internal adapters
+                is_external = self.interface_info and self.interface_info.get('likely_external', False)
+                if not is_external:
+                    colored_log("warning", "Monitor mode disable failed - attempting NetworkManager restart...")
+                    try:
+                        execute_command(["service", "NetworkManager", "restart"])
+                        colored_log("success", "NetworkManager restarted as fallback")
+                    except:
+                        pass
+                else:
+                    colored_log("warning", "Monitor mode disable reported issues (external adapter - no NetworkManager restart needed)")
+        except Exception as e:
+            colored_log("error", f"Cleanup error: {e}")
+            # Last resort - only for internal adapters
+            is_external = self.interface_info and self.interface_info.get('likely_external', False)
+            if not is_external:
+                try:
+                    execute_command(["service", "NetworkManager", "restart"])
+                    colored_log("warning", "Forced NetworkManager restart")
+                except:
+                    colored_log("error", "Could not restore network - manual intervention may be needed")
+
+
 class Wifyte:
     def __init__(self):
         self.interface = None
+        self.interface_info = None
         self.monitor_interface = None
         self.networks = []
         self.temp_dir = tempfile.mkdtemp()
@@ -34,6 +118,7 @@ class Wifyte:
         os.makedirs(self.handshake_dir, exist_ok=True)
         self.stop_capture = False
         self.handshake_found = False
+        self.cleanup_manager = CleanupManager()
 
         # Parse command-line arguments
         parser = argparse.ArgumentParser(
@@ -75,6 +160,15 @@ class Wifyte:
         try:
             # Setup and scan
             setup_interface(self)
+            
+            # Register cleanup manager IMMEDIATELY after monitor mode enabled
+            # This ensures cleanup happens on Ctrl+C, crash, or normal exit
+            self.cleanup_manager.register(
+                self.interface,
+                self.monitor_interface,
+                self.interface_info
+            )
+            
             self.networks = scan_networks(self)
 
             if not self.networks:
@@ -185,11 +279,23 @@ class Wifyte:
             else:
                 colored_log("warning", "No handshakes captured for cracking.")
 
+            # Normal exit - let user decide about cleanup
             _exit_program(self)
+            # Mark cleanup as done if user chose to disable
+            if not self.monitor_interface:
+                self.cleanup_manager.cleanup_done = True
 
         except KeyboardInterrupt:
-            colored_log("warning", "Program cancelled by user!")
-            _exit_program(self)
+            # CleanupManager signal handler will handle this
+            # This except block is backup in case signal handler doesn't fire
+            colored_log("warning", "Program interrupted by user!")
+        except Exception as e:
+            colored_log("error", f"Unexpected error: {e}")
+            # CleanupManager atexit will handle cleanup
+        finally:
+            # Final safety net - only cleanup if not already done
+            if not self.cleanup_manager.cleanup_done and self.monitor_interface:
+                self.cleanup_manager._cleanup()
 
 
 if __name__ == "__main__":
@@ -202,7 +308,6 @@ if __name__ == "__main__":
 
     # Check dependencies
     dependencies = ["airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng"]
-    from utils import check_dependency
 
     missing = [dep for dep in dependencies if not check_dependency(dep)]
 

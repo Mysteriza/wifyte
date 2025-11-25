@@ -3,8 +3,7 @@ import time
 import signal
 import subprocess
 from dataclasses import dataclass
-from utils import colored_log, execute_command, sanitize_ssid
-from helpers import check_dependency
+from utils import colored_log, execute_command, sanitize_ssid, check_dependency
 from rich.console import Console
 from mac_vendor_lookup import MacLookup  # Library to find vendor from MAC addr
 

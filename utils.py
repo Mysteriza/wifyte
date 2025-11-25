@@ -87,6 +87,17 @@ def check_dependency(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
+def check_handshake(cap_file: str) -> bool:
+    """
+    Check if capture file contains a valid handshake.
+    Centralized function to avoid duplication.
+    """
+    if not os.path.exists(cap_file):
+        return False
+    result = execute_command(["aircrack-ng", cap_file])
+    return result and "1 handshake" in result.stdout
+
+
 def sanitize_ssid(ssid: str) -> str:
     """
     Sanitize SSID to be safe for use as filename.
@@ -196,9 +207,17 @@ def _exit_program(self):
         disable_monitor = input().lower() == "y"
 
         if disable_monitor and self.monitor_interface:
-            success = toggle_monitor_mode(self.monitor_interface, enable=False)
+            success = toggle_monitor_mode(
+                self.monitor_interface, 
+                enable=False,
+                interface_info=getattr(self, 'interface_info', None)
+            )
             if success:
                 colored_log("success", "Monitor mode disabled successfully.")
+                # Mark as cleaned to prevent double cleanup
+                if hasattr(self, 'cleanup_manager'):
+                    self.cleanup_manager.cleanup_done = True
+                self.monitor_interface = None  # Clear to prevent auto-cleanup
             else:
                 colored_log("warning", "Failed to disable monitor mode cleanly.")
         elif self.monitor_interface:
