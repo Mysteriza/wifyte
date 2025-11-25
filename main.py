@@ -269,7 +269,7 @@ class Wifyte:
                         "info", f"No existing handshake file found for {target.essid}!"
                     )
 
-                # Capture new handshake only if no existing was used
+                # Capture handshake (using proven original method)
                 handshake_path = capture_handshake(self, target)
                 if handshake_path:
                     successful_targets.append((handshake_path, target))
