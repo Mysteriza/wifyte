@@ -224,6 +224,9 @@ def _exit_program(self):
             colored_log(
                 "success", f"Monitor mode remains active on {self.monitor_interface}"
             )
+            # IMPORTANT: Mark cleanup as done so main.py doesn't force cleanup
+            if hasattr(self, 'cleanup_manager'):
+                self.cleanup_manager.cleanup_done = True
 
         colored_log("info", "Program closed, Thank You!")
     except KeyboardInterrupt:
