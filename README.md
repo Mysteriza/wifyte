@@ -91,12 +91,15 @@ sudo python3 main.py
 
 ### Basic Usage
 
-```bash
-# Run with Python
-sudo python3 main.py
+To run with **root privileges** (required) while using the virtual environment:
 
-# Or with uv (faster)
-sudo uv run main.py
+```bash
+sudo ./.venv/bin/python3 main.py
+```
+
+Or if you installed dependencies globally:
+```bash
+sudo python3 main.py
 ```
 
 ### Workflow
