@@ -260,7 +260,8 @@ def toggle_monitor_mode(interface: str, enable=True, interface_info: dict = None
             execute_command(["service", "NetworkManager", "restart"], capture_output=False)
             colored_log("success", "Monitor mode disabled and NetworkManager restarted.")
         else:
-            colored_log("success", "Monitor mode disabled (NetworkManager was not stopped).")
+            # Silent return, let utils.py handle the message
+            pass
         
         return True
 
