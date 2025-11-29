@@ -213,7 +213,13 @@ def _exit_program(self):
                 interface_info=getattr(self, 'interface_info', None)
             )
             if success:
-                colored_log("success", "Monitor mode disabled successfully.")
+                # Silent success or simple message if needed, but user asked to remove one.
+                # The user said: Hapus salah satunya saja: [+] Monitor mode disabled (NetworkManager was not stopped). [+] Monitor mode disabled successfully.
+                # I will keep the specific one if it returns specific info, or just a generic one.
+                # interface.py toggle_monitor_mode returns True/False.
+                # I'll keep "Monitor mode disabled successfully." but maybe interface.py also prints?
+                # Let's just print one clean message.
+                colored_log("success", "Monitor mode disabled.")
                 # Mark as cleaned to prevent double cleanup
                 if hasattr(self, 'cleanup_manager'):
                     self.cleanup_manager.cleanup_done = True

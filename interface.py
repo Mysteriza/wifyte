@@ -139,7 +139,9 @@ def select_interface() -> tuple[str, dict]:
         colored_log("error", "No WiFi interfaces found!")
         sys.exit(1)
 
-    console = Console()
+    if not interfaces:
+        colored_log("error", "No WiFi interfaces found!")
+        sys.exit(1)
 
     console.print("[*] Available WiFi Interfaces:", style="bright_cyan")
     for idx, intf in enumerate(interfaces):
@@ -148,7 +150,7 @@ def select_interface() -> tuple[str, dict]:
         driver = intf["driver"]
         type_str = "External" if intf["likely_external"] else "Internal"
         warning = (
-            "⚠️ Likely unsupported!"
+            "[!] Likely unsupported!"
             if not intf["likely_external"] and not intf.get("is_internal", False)
             else ""
         )

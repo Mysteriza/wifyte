@@ -18,11 +18,8 @@ from utils import (
     _exit_program,
     sanitize_ssid,
     check_dependency,
+    console,
 )
-from rich.console import Console
-
-# Rich console setup
-console = Console()
 
 
 class CleanupManager:
@@ -50,7 +47,8 @@ class CleanupManager:
             atexit.register(self._atexit_cleanup)
             
             self.cleanup_registered = True
-            colored_log("info", "Safety cleanup handler registered successfully")
+            self.cleanup_registered = True
+            # Silent registration
     
     def pause_signal_handlers(self):
         """Temporarily disable signal handlers (for continuous scanning)"""
@@ -128,7 +126,9 @@ class Wifyte:
         self.networks = []
         self.temp_dir = tempfile.mkdtemp()
         self.handshake_dir = os.path.join(os.getcwd(), "handshakes")
+        self.results_dir = os.path.join(os.getcwd(), "results")
         os.makedirs(self.handshake_dir, exist_ok=True)
+        os.makedirs(self.results_dir, exist_ok=True)
         self.stop_capture = False
         self.handshake_found = False
         self.cleanup_manager = CleanupManager()
@@ -168,6 +168,8 @@ class Wifyte:
 
     def run(self):
         """Main program flow with support for multiple targets"""
+        # Clear terminal for clean start
+        os.system("cls" if os.name == "nt" else "clear")
         _display_banner()
 
         try:

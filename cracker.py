@@ -9,11 +9,8 @@ from utils import (
     sanitize_ssid,
     check_handshake,
     check_dependency,
+    console,
 )
-from rich.console import Console
-
-# Rich console setup
-console = Console()
 
 
 def crack_password(handshake_path: str, wordlist_path: str, network) -> str | None:

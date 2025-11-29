@@ -6,13 +6,10 @@ import subprocess
 import threading
 import shutil
 from datetime import datetime
-from utils import colored_log, execute_command, sanitize_ssid, check_handshake
+from utils import colored_log, execute_command, sanitize_ssid, check_handshake, console
 from scanner import detect_connected_clients
-from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
-
-console = Console()
+from rich.panel import Panel
 
 
 def capture_handshake(self, network) -> str | None:
@@ -35,7 +32,7 @@ def capture_handshake(self, network) -> str | None:
     
     console.print(Panel(
         client_table,
-        title=f"[bold green]✓ {len(clients)} Client(s) Detected[/bold green]",
+        title=f"[bold green][+] {len(clients)} Client(s) Detected[/bold green]",
         border_style="green"
     ))
 
@@ -73,7 +70,7 @@ def capture_handshake(self, network) -> str | None:
     timeout = 60
     start_time = time.time()
     
-    console.print(f"\n[bold cyan]📡 Capturing handshake for {network.essid}...[/bold cyan]")
+    console.print(f"\n[bold cyan][*] Capturing handshake for {network.essid}...[/bold cyan]")
     
     try:
         while True:
@@ -81,16 +78,16 @@ def capture_handshake(self, network) -> str | None:
             remaining_time = max(0, timeout - elapsed_time)
             
             progress = int((elapsed_time / timeout) * 30)
-            bar = f"[{'█' * progress}{'░' * (30 - progress)}]"
+            bar = f"[{'=' * progress}{'-' * (30 - progress)}]"
             
             console.print(
-                f"[cyan]⏱  {elapsed_time}s / {timeout}s {bar}[/cyan]",
+                f"[cyan][TIME] {elapsed_time}s / {timeout}s {bar}[/cyan]",
                 end="\r"
             )
 
             if os.path.exists(cap_file) and check_handshake(cap_file):
                 console.print(" " * 80, end="\r")
-                console.print("[bold green]✓ Handshake detected![/bold green]")
+                console.print("[bold green][+] Handshake detected![/bold green]")
                 break
 
             if elapsed_time >= timeout:

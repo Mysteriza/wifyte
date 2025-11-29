@@ -3,12 +3,9 @@ import time
 import signal
 import subprocess
 from dataclasses import dataclass
-from utils import colored_log, execute_command, sanitize_ssid, check_dependency
-from rich.console import Console
-from mac_vendor_lookup import MacLookup  # Library to find vendor from MAC addr
+from utils import colored_log, execute_command, sanitize_ssid, check_dependency, console
+from mac_vendor_lookup import MacLookup
 
-# Rich console setup
-console = Console()
 mac_lookup = MacLookup()
 
 
@@ -474,6 +471,8 @@ def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> 
     # Show progress countdown with Rich
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
     
+    clients = []
+    
     try:
         with Progress(
             SpinnerColumn(),
@@ -489,14 +488,55 @@ def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> 
             
             for i in range(duration):
                 time.sleep(1)
-                progress.update(scan_task, advance=1)
+                
+                # Live update of detected clients
+                current_clients = []
+                csv_file = f"{output_file}-01.csv"
+                if os.path.exists(csv_file):
+                    try:
+                        with open(csv_file, "r", encoding="utf-8", errors="replace") as f:
+                            lines = f.readlines()
+                        
+                        client_section = False
+                        for line in [l.strip() for l in lines]:
+                            if line.startswith("Station MAC"):
+                                client_section = True
+                                continue
+                            if client_section and line:
+                                parts = [p.strip() for p in line.split(",")]
+                                # Basic validation: MAC length and BSSID match
+                                if len(parts) >= 6:
+                                    client_mac = parts[0].strip()
+                                    client_bssid = parts[5].strip()
+                                    
+                                    # Validate MAC format (simple check)
+                                    if len(client_mac) == 17 and ":" in client_mac:
+                                        # Filter by BSSID to ensure it belongs to target
+                                        # (Allow if BSSID matches target OR if we are targeting a specific BSSID via airodump)
+                                        # Note: airodump --bssid filters capture, but checking here is safer.
+                                        if client_bssid == network.bssid:
+                                            current_clients.append(client_mac)
+                    except:
+                        pass
+                
+                # Update description with live count
+                # Update description with live count
+                for client in current_clients:
+                    if client not in clients:
+                        clients.append(client)
+                
+                progress.update(
+                    scan_task, 
+                    advance=1, 
+                    description=f"Scanning for clients on {network.essid} [green]({len(clients)} found)[/green]"
+                )
+                
     finally:
         proc.send_signal(signal.SIGTERM)
         proc.wait()
 
-    clients = []
-
-    # Parse client results
+    # Final parse to ensure we get everything (redundant but safe)
+    # Re-read the file one last time to catch any clients that might have appeared at the very end
     csv_file = f"{output_file}-01.csv"
     if os.path.exists(csv_file):
         try:
@@ -510,13 +550,20 @@ def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> 
                     continue
                 if client_section and line:
                     parts = [p.strip() for p in line.split(",")]
-                    if len(parts) >= 6 and parts[0].strip():
-                        clients.append(parts[0])
+                    if len(parts) >= 6:
+                        client_mac = parts[0].strip()
+                        client_bssid = parts[5].strip()
+                        if len(client_mac) == 17 and ":" in client_mac:
+                             if client_bssid == network.bssid:
+                                if client_mac not in clients:
+                                    clients.append(client_mac)
         except Exception as e:
             colored_log("error", f"Error reading client detection results: {e}!")
-    else:
-        colored_log("error", "Client detection results file not found!")
-
+    
+    # Remove duplicates
+    clients = list(set(clients))
+    
+    # Debug log to confirm what is being returned
     if clients:
         colored_log("success", f"Detected {len(clients)} connected clients!")
     else:
