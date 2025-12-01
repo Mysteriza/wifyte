@@ -5,7 +5,6 @@ import os
 from utils import execute_command, colored_log, lookup_vendor
 from rich.console import Console
 
-# Rich console setup
 console = Console()
 
 
@@ -24,7 +23,6 @@ def _detect_vm_environment() -> bool:
     vm_detected = False
     
     try:
-        # Method 1: Check DMI files (require exact matches, not substrings)
         dmi_files = [
             "/sys/class/dmi/id/product_name",
             "/sys/class/dmi/id/sys_vendor",
@@ -36,10 +34,9 @@ def _detect_vm_environment() -> bool:
                 try:
                     with open(dmi_file, 'r') as f:
                         content = f.read().strip().lower()
-                        # Require stronger match - full word matches
                         for vm_type, keywords in vm_indicators.items():
                             for keyword in keywords:
-                                if keyword in content and len(content) < 50:  # Avoid false positives from long strings
+                                if keyword in content and len(content) < 50:
                                     vm_detected = True
                                     break
                             if vm_detected:
@@ -67,11 +64,9 @@ def get_interface_info(interface: str) -> dict:
             "in_vm": False,
         }
 
-    # Extract MAC address
     mac_match = re.search(r"link/ether ([0-9A-Fa-f:]{17})", result.stdout)
     mac = mac_match.group(1).upper() if mac_match else "Unknown"
 
-    # Get driver info
     phy_result = execute_command(["ethtool", "-i", interface])
     driver = "Unknown"
     if phy_result and "driver:" in phy_result.stdout:
@@ -79,17 +74,13 @@ def get_interface_info(interface: str) -> dict:
         if driver_match:
             driver = driver_match.group(1)
 
-    # ENHANCED DETECTION: Multiple methods
     likely_external = False
     
-    # Method 1: Name-based detection (existing)
     if interface.startswith("wlx") or interface.startswith("usb"):
         likely_external = True
     
-    # Method 2: USB detection via sysfs
     if not likely_external:
         try:
-            # Check if connected via USB bus
             usb_path = f"/sys/class/net/{interface}/device/uevent"
             if os.path.exists(usb_path):
                 with open(usb_path, 'r') as f:
@@ -97,7 +88,6 @@ def get_interface_info(interface: str) -> dict:
                     if 'usb' in content:
                         likely_external = True
                         
-            # Alternative: check device path
             device_path = f"/sys/class/net/{interface}/device"
             if os.path.exists(device_path):
                 real_path = os.path.realpath(device_path)
@@ -106,7 +96,6 @@ def get_interface_info(interface: str) -> dict:
         except Exception:
             pass
     
-    # Method 3: VM environment detection
     in_vm = _detect_vm_environment()
 
     return {
@@ -155,7 +144,6 @@ def select_interface() -> tuple[str, dict]:
             else ""
         )
         
-        # Show VM indicator if detected
         vm_indicator = " [VM Detected]" if intf.get("in_vm") else ""
 
         console.print(f"  [{idx + 1}] {name} ({type_str}{vm_indicator})")
@@ -176,10 +164,8 @@ def select_interface() -> tuple[str, dict]:
                 selected_intf = selected_info["name"]
                 colored_log("info", f"Selected interface: {selected_intf}")
                 
-                # SMART PROMPT: If single adapter in VM or uncertain detection
                 if len(interfaces) == 1:
                     intf_info = interfaces[0]
-                    # Ask user if in VM or if detection is uncertain
                     if intf_info['in_vm'] or not intf_info['likely_external']:
                         console.print(
                             "\n[?] Is this an external USB Wi-Fi adapter? (y/n)",
@@ -204,20 +190,15 @@ def select_interface() -> tuple[str, dict]:
 def toggle_monitor_mode(interface: str, enable=True, interface_info: dict = None) -> str | bool | None:
     """Toggle monitor mode with smart interface isolation"""
     if enable:
-        # SMART DECISION: Only kill NetworkManager if using internal adapter
         is_external = interface_info and interface_info.get('likely_external', False)
         
         if not is_external:
-            # Internal adapter: need to kill NetworkManager
             colored_log("warning", "Using internal adapter - NetworkManager will be stopped")
             execute_command(["airmon-ng", "check", "kill"])
         else:
-            # External adapter: keep NetworkManager running
             colored_log("success", "Using external adapter - keeping NetworkManager active for internet!")
-            # Only check for interfering processes, don't kill NetworkManager
             execute_command(["airmon-ng", "check"])
 
-        # Turn off interface and enable monitor mode
         execute_command(["ifconfig", interface, "down"])
         result = execute_command(["airmon-ng", "start", interface])
 
@@ -225,7 +206,6 @@ def toggle_monitor_mode(interface: str, enable=True, interface_info: dict = None
             colored_log("error", f"Failed to enable monitor mode on {interface}!")
             return None
 
-        # Find monitor interface name
         match = re.search(
             r"(Created monitor mode interface|monitor mode enabled on) (\w+)",
             result.stdout,
@@ -233,7 +213,6 @@ def toggle_monitor_mode(interface: str, enable=True, interface_info: dict = None
         if match:
             monitor_interface = match.group(2)
         else:
-            # Backup method to find monitor interface
             monitor_interface = next(
                 (
                     iface
@@ -243,24 +222,20 @@ def toggle_monitor_mode(interface: str, enable=True, interface_info: dict = None
                 f"{interface}mon",
             )
 
-        # Ensure interface is up
         execute_command(["ifconfig", monitor_interface, "up"])
         colored_log("success", f"Monitor mode active on {monitor_interface}.")
         return monitor_interface
     else:
-        # Disable monitor mode
         result = execute_command(["airmon-ng", "stop", interface])
         if not result or result.returncode != 0:
             colored_log("error", "Failed to disable monitor mode!")
             return False
 
-        # Only restart NetworkManager if we killed it (internal adapter)
         is_external = interface_info and interface_info.get('likely_external', False)
         if not is_external:
             execute_command(["service", "NetworkManager", "restart"], capture_output=False)
             colored_log("success", "Monitor mode disabled and NetworkManager restarted.")
         else:
-            # Silent return, let utils.py handle the message
             pass
         
         return True
@@ -271,14 +246,12 @@ def setup_interface(self):
     colored_log("info", "Searching for wifi interfaces...")
     self.interface, self.interface_info = select_interface()
 
-    # Check if already in monitor mode
     output = execute_command(["iwconfig", self.interface]).stdout
     if output and "Mode:Monitor" in output:
         colored_log("success", f"Interface {self.interface} already in monitor mode!")
         self.monitor_interface = self.interface
         return
 
-    # Enable monitor mode with interface info for smart isolation
     colored_log("info", f"Activating monitor mode on {self.interface}...")
     self.monitor_interface = toggle_monitor_mode(
         self.interface, 

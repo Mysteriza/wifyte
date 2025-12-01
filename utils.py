@@ -9,14 +9,11 @@ import os
 from typing import Optional, List
 from rich.console import Console
 
-# Rich console setup
 console = Console()
 
-# Logging configuration for terminal only
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("wifyte")
 
-# Global vendor map loaded from manuf file
 VENDOR_MAP = {}
 
 
@@ -39,14 +36,13 @@ def load_manuf_file(manuf_path: str = "manuf"):
                 if not line or line.startswith("#"):
                     continue
 
-                parts = line.split(None, 2)  # Split into up to 3 parts
+                parts = line.split(None, 2)
                 if len(parts) < 2:
                     continue
 
                 mac_prefix = parts[0].upper()
                 vendor_name = parts[2] if len(parts) == 3 else parts[1]
 
-                # Handle special prefixes like '/36'
                 if "/" in mac_prefix:
                     base_mask = mac_prefix.split("/")[0]
                     octets = base_mask.replace("-", ":").split(":")
@@ -54,13 +50,12 @@ def load_manuf_file(manuf_path: str = "manuf"):
                     octets = mac_prefix.replace("-", ":").split(":")
 
                 if len(octets) >= 3:
-                    normalized = ":".join(octets[:3])  # First 3 octets only
+                    normalized = ":".join(octets[:3])
                     VENDOR_MAP[normalized] = vendor_name
     except Exception as e:
         console.print(f"[!] Error loading manuf file: {e}", style="red")
 
 
-# Load vendor map at startup
 load_manuf_file()
 
 
@@ -72,7 +67,6 @@ def lookup_vendor(mac: str) -> str:
     if ":" not in mac:
         return "Unknown"
 
-    # Normalize MAC
     normalized = re.sub(r"[^A-Z0-9]", ":", mac.upper())
     octets = normalized.split(":")
     if len(octets) < 3:
@@ -213,24 +207,16 @@ def _exit_program(self):
                 interface_info=getattr(self, 'interface_info', None)
             )
             if success:
-                # Silent success or simple message if needed, but user asked to remove one.
-                # The user said: Hapus salah satunya saja: [+] Monitor mode disabled (NetworkManager was not stopped). [+] Monitor mode disabled successfully.
-                # I will keep the specific one if it returns specific info, or just a generic one.
-                # interface.py toggle_monitor_mode returns True/False.
-                # I'll keep "Monitor mode disabled successfully." but maybe interface.py also prints?
-                # Let's just print one clean message.
                 colored_log("success", "Monitor mode disabled.")
-                # Mark as cleaned to prevent double cleanup
                 if hasattr(self, 'cleanup_manager'):
                     self.cleanup_manager.cleanup_done = True
-                self.monitor_interface = None  # Clear to prevent auto-cleanup
+                self.monitor_interface = None
             else:
                 colored_log("warning", "Failed to disable monitor mode cleanly.")
         elif self.monitor_interface:
             colored_log(
                 "success", f"Monitor mode remains active on {self.monitor_interface}"
             )
-            # IMPORTANT: Mark cleanup as done so main.py doesn't force cleanup
             if hasattr(self, 'cleanup_manager'):
                 self.cleanup_manager.cleanup_done = True
 

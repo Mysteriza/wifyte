@@ -39,21 +39,16 @@ class CleanupManager:
         self.interface_info = interface_info
         
         if not self.cleanup_registered:
-            # Store original handlers
             self.original_sigint_handler = signal.signal(signal.SIGINT, self._signal_handler)
             self.original_sigterm_handler = signal.signal(signal.SIGTERM, self._signal_handler)
             
-            # Register atexit handler for crashes/unexpected exits
             atexit.register(self._atexit_cleanup)
             
             self.cleanup_registered = True
-            self.cleanup_registered = True
-            # Silent registration
     
     def pause_signal_handlers(self):
         """Temporarily disable signal handlers (for continuous scanning)"""
         if self.cleanup_registered:
-            # Restore to default handlers
             signal.signal(signal.SIGINT, signal.default_int_handler)
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
     
@@ -95,7 +90,6 @@ class CleanupManager:
             if success:
                 colored_log("success", "Network interfaces restored successfully!")
             else:
-                # Only restart NetworkManager for internal adapters
                 is_external = self.interface_info and self.interface_info.get('likely_external', False)
                 if not is_external:
                     colored_log("warning", "Monitor mode disable failed - attempting NetworkManager restart...")
@@ -108,7 +102,6 @@ class CleanupManager:
                     colored_log("warning", "Monitor mode disable reported issues (external adapter - no NetworkManager restart needed)")
         except Exception as e:
             colored_log("error", f"Cleanup error: {e}")
-            # Last resort - only for internal adapters
             is_external = self.interface_info and self.interface_info.get('likely_external', False)
             if not is_external:
                 try:
@@ -133,7 +126,6 @@ class Wifyte:
         self.handshake_found = False
         self.cleanup_manager = CleanupManager()
 
-        # Parse command-line arguments
         parser = argparse.ArgumentParser(
             description="WiFi Handshake Capture & Cracking Tool"
         )
@@ -142,7 +134,6 @@ class Wifyte:
         )
         args = parser.parse_args()
 
-        # Setup default wordlist
         if args.wordlist:
             self.wordlist_path = os.path.abspath(args.wordlist)
             if not os.path.exists(self.wordlist_path):
@@ -168,30 +159,23 @@ class Wifyte:
 
     def run(self):
         """Main program flow with support for multiple targets"""
-        # Clear terminal for clean start
         os.system("cls" if os.name == "nt" else "clear")
         _display_banner()
 
         try:
-            # Setup and scan
             setup_interface(self)
             
-            # Register cleanup manager IMMEDIATELY after monitor mode enabled
-            # This ensures cleanup happens on Ctrl+C, crash, or normal exit
             self.cleanup_manager.register(
                 self.interface,
                 self.monitor_interface,
                 self.interface_info
             )
             
-            # Temporarily pause signal handlers for continuous scanning
-            # (Ctrl+C should stop scan, not exit program)
             self.cleanup_manager.pause_signal_handlers()
             
             try:
                 self.networks = scan_networks_continuous(self)
             finally:
-                # Resume signal handlers after scan
                 self.cleanup_manager.resume_signal_handlers()
 
 
@@ -200,16 +184,11 @@ class Wifyte:
                 _exit_program(self)
                 return
 
-            # No need to display networks again - already shown in live table
-            # Jump straight to target selection
-
-            # Select target(s)
             targets = select_target(self.networks)
             if not targets:
                 _exit_program(self)
                 return
 
-            # Handle single or multiple targets
             if len(targets) > 1:
                 console.print("\n=== Multiple Targets Mode ===", style="bold magenta")
                 console.print(
@@ -230,7 +209,6 @@ class Wifyte:
                         "success", f"Selected target: {target.essid} ({target.bssid})"
                     )
 
-                # Decloak hidden SSID if necessary
                 if target.essid == "<HIDDEN SSID>":
                     revealed_ssid = decloak_ssid(self, target)
                     if revealed_ssid:
@@ -244,11 +222,9 @@ class Wifyte:
                             "Failed to decloak SSID. Proceeding with capture anyway!",
                         )
 
-                # Sanitize SSID before use
                 safe_essid = sanitize_ssid(target.essid)
                 cap_file = os.path.join(self.handshake_dir, f"{safe_essid}.cap")
 
-                # Check existing .cap file
                 if os.path.exists(cap_file):
                     colored_log("info", f"Found existing handshake file: {cap_file}")
                     console.print(
@@ -271,7 +247,6 @@ class Wifyte:
                         "info", f"No existing handshake file found for {target.essid}!"
                     )
 
-                # Capture handshake (using proven original method)
                 handshake_path = capture_handshake(self, target)
                 if handshake_path:
                     successful_targets.append((handshake_path, target))
@@ -281,51 +256,84 @@ class Wifyte:
                         f"Failed to capture handshake for {target.essid}. Skipping to next target.",
                     )
 
-            # Crack passwords for all captured handshakes
             if successful_targets:
                 if len(targets) > 1:
                     console.print(
                         "\n=== Starting Password Cracking ===", style="bold magenta"
                     )
+                
+                cracked_ssids = {}
+                
                 for i, (handshake_path, target) in enumerate(successful_targets, 1):
                     if len(targets) > 1:
                         console.print(
                             f"\n[Cracking Target {i}/{len(successful_targets)}]",
                             style="bold yellow",
                         )
+                    
+                    if target.essid in cracked_ssids:
+                        previous_password = cracked_ssids[target.essid]
+                        colored_log("info", f"Checking if {target.essid} uses the same password as previous target...")
+                        
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_wl:
+                            tmp_wl.write(f"{previous_password}\n")
+                            tmp_wl_path = tmp_wl.name
+                        
+                        try:
+                            verified_password = crack_password(handshake_path, tmp_wl_path, target, silent=True)
+                            
+                            if verified_password:
+                                colored_log("success", f"Confirmed! Same password works: [bold]{verified_password}[/bold]")
+                                console.print(f"  - Skipped full cracking (password verified)", style="dim")
+                                
+                                results_dir = "results"
+                                os.makedirs(results_dir, exist_ok=True)
+                                safe_essid = sanitize_ssid(target.essid)
+                                result_file = os.path.join(results_dir, f"{safe_essid}_result.txt")
+                                with open(result_file, "a") as f:
+                                    f.write(f"\n--- Duplicate SSID Target ---\n")
+                                    f.write(f"Network: {target.essid} ({target.bssid})\n")
+                                    f.write(f"Password: {verified_password}\n")
+                                    f.write(f"Channel: {target.channel}\n")
+                                    f.write(f"Encryption: {target.encryption}\n")
+                                    f.write(f"Power: {target.power} dBm\n")
+                                    f.write(f"Note: Result verified from previously cracked target in same session\n")
+                                colored_log("info", f"Results saved to {result_file}")
+                                continue
+                            else:
+                                colored_log("warning", "Different password detected! Proceeding with full cracking...")
+                        finally:
+                            if os.path.exists(tmp_wl_path):
+                                os.unlink(tmp_wl_path)
+
                     colored_log("info", f"Cracking {target.essid} ({target.bssid})...")
-                    crack_password(handshake_path, self.wordlist_path, target)
+                    password = crack_password(handshake_path, self.wordlist_path, target)
+                    
+                    if password:
+                        cracked_ssids[target.essid] = password
             else:
                 colored_log("warning", "No handshakes captured for cracking.")
 
-            # Normal exit - let user decide about cleanup
             _exit_program(self)
-            # Mark cleanup as done if user chose to disable
             if not self.monitor_interface:
                 self.cleanup_manager.cleanup_done = True
 
         except KeyboardInterrupt:
-            # CleanupManager signal handler will handle this
-            # This except block is backup in case signal handler doesn't fire
             colored_log("warning", "Program interrupted by user!")
         except Exception as e:
             colored_log("error", f"Unexpected error: {e}")
-            # CleanupManager atexit will handle cleanup
         finally:
-            # Final safety net - only cleanup if not already done
             if not self.cleanup_manager.cleanup_done and self.monitor_interface:
                 self.cleanup_manager._cleanup()
 
 
 if __name__ == "__main__":
-    # Check root access
     if os.geteuid() != 0:
         colored_log(
             "error", "This program requires root access. Please run with 'sudo'"
         )
         sys.exit(1)
 
-    # Check dependencies
     dependencies = ["airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng"]
 
     missing = [dep for dep in dependencies if not check_dependency(dep)]

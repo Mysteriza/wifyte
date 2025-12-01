@@ -14,16 +14,14 @@ class WiFiNetwork:
     id: int
     bssid: str
     channel: int
-    power: int  # PWR in dBm
+    power: int
     essid: str
     encryption: str
 
     def __str__(self) -> str:
-        # Convert PWR (dBm) to percentage (approximation: -100 dBm = 0%, -30 dBm = 100%)
         signal_percent = max(
             0, min(100, int((self.power + 100) * 1.42857))
-        )  # Linear approximation
-        # Get vendor name from BSSID
+        )
         try:
             vendor = mac_lookup.lookup(self.bssid)
         except Exception:
@@ -56,10 +54,8 @@ def _parse_scan_csv(output_file: str) -> list[WiFiNetwork]:
                 if len(parts) >= 14:
                     essid = parts[13].strip().replace("\x00", "")
                     encryption = f"{parts[5]} {parts[6]}".strip()
-                    # Skip open networks (OPN)
                     if "OPN" in encryption.upper():
                         continue
-                    # Detect hidden SSID
                     if (not essid or essid.startswith("<length:")) and "OPN" not in encryption.upper():
                         essid = "<HIDDEN SSID>"
                     network_id += 1
@@ -90,7 +86,6 @@ def _display_networks_live(networks: list[WiFiNetwork]):
     """Display networks with live updates (clear screen style)"""
     import sys
     
-    # Use Rich's built-in clear (more reliable than ANSI codes)
     console.clear()
     
     console.print("═" * 100, style="bright_cyan")
@@ -101,7 +96,6 @@ def _display_networks_live(networks: list[WiFiNetwork]):
     console.print("═" * 100, style="bright_cyan")
     console.print()
     
-    # Show networks sorted by signal
     if len(networks) > 25:
         console.print(f"Showing top 25 of {len(networks)} networks:\n", style="yellow")
         display_nets = networks[:25]
@@ -126,17 +120,15 @@ def scan_networks_continuous(self) -> list[WiFiNetwork]:
         colored_log("error", "No monitor mode interface found!")
         return []
 
-    # Check dependencies
     if not check_dependency("airodump-ng"):
         colored_log("error", "airodump-ng is required for scanning!")
         return []
 
     colored_log("info", "Starting continuous WiFi scan (Press Ctrl+C when ready to select targets)...")
-    time.sleep(1)  # Brief pause before starting live display
+    time.sleep(1)
     
     output_file = os.path.join(self.temp_dir, "scan-01.csv")
 
-    # Start airodump-ng in background
     proc = subprocess.Popen(
         [
             "airodump-ng",
@@ -167,7 +159,6 @@ def scan_networks_continuous(self) -> list[WiFiNetwork]:
             signal_percent = max(0, min(100, int((net.power + 100) * 1.42857)))
             pwr_color = "bright_green" if signal_percent > 60 else "yellow" if signal_percent > 30 else "red"
             
-            # Safe vendor lookup
             try:
                 vendor = mac_lookup.lookup(net.bssid)
                 vendor = vendor[:18] if len(vendor) > 18 else vendor
@@ -199,39 +190,33 @@ def scan_networks_continuous(self) -> list[WiFiNetwork]:
     try:
         networks_dict = {}
         
-        # Use Rich Live display for smooth updating without scrolling
         with Live(generate_live_display([]), refresh_per_second=1, console=console) as live:
             while True:
                 time.sleep(0.5)
                 
-                # Parse and update network list
                 new_networks = _parse_scan_csv(output_file)
                 for net in new_networks:
                     networks_dict[net.bssid] = net
                 
                 if networks_dict:
-                    # Sort by signal strength
                     sorted_networks = sorted(
                         networks_dict.values(),
                         key=lambda x: x.power,
                         reverse=True
                     )
-                    # Reassign IDs after sorting for sequential display
                     for i, net in enumerate(sorted_networks, 1):
                         net.id = i
                     
-                    # Update live display
                     live.update(generate_live_display(sorted_networks))
                 
     except KeyboardInterrupt:
-        pass  # Live context will clean up automatically
+        pass
     finally:
         proc.send_signal(signal.SIGTERM)
         proc.wait()
     
     console.print("\n[*] Scan stopped by user", style="bright_cyan")
     
-    # Final sort and ID assignment
     networks_list = sorted(networks_dict.values(), key=lambda x: x.power, reverse=True)
     for i, network in enumerate(networks_list, 1):
         network.id = i
@@ -250,7 +235,6 @@ def scan_networks(self) -> list[WiFiNetwork]:
         colored_log("error", "No monitor mode interface found!")
         return []
 
-    # Check dependencies
     if not check_dependency("airodump-ng"):
         colored_log("error", "airodump-ng is required for scanning!")
         return []
@@ -258,7 +242,6 @@ def scan_networks(self) -> list[WiFiNetwork]:
     colored_log("info", "Starting WiFi network scan...")
     output_file = os.path.join(self.temp_dir, "scan-01.csv")
 
-    # Start airodump-ng
     proc = subprocess.Popen(
         [
             "airodump-ng",
@@ -282,7 +265,6 @@ def scan_networks(self) -> list[WiFiNetwork]:
 
     networks = []
 
-    # Parse CSV results
     if os.path.exists(output_file):
         try:
             with open(output_file, "r", encoding="utf-8", errors="replace") as f:
@@ -302,10 +284,8 @@ def scan_networks(self) -> list[WiFiNetwork]:
                     if len(parts) >= 14:
                         essid = parts[13].strip().replace("\x00", "")
                         encryption = f"{parts[5]} {parts[6]}".strip()
-                        # Skip open networks (OPN)
                         if "OPN" in encryption.upper():
                             continue
-                        # Detect hidden SSID (empty or <length: X>) for encrypted networks
                         if (
                             not essid or essid.startswith("<length:")
                         ) and "OPN" not in encryption.upper():
@@ -333,9 +313,7 @@ def scan_networks(self) -> list[WiFiNetwork]:
     else:
         colored_log("error", "Scan results file not found!")
 
-    # Sort networks by signal strength (descending order)
     networks.sort(key=lambda x: x.power, reverse=True)
-    # Reassign IDs after sorting
     for i, network in enumerate(networks, 1):
         network.id = i
 
@@ -350,9 +328,8 @@ def scan_networks(self) -> list[WiFiNetwork]:
 def decloak_ssid(self, network: WiFiNetwork) -> str | None:
     """Decloak a hidden SSID by capturing probe requests after deauthentication"""
     if network.essid != "<HIDDEN SSID>":
-        return network.essid  # No need to decloak if already known
+        return network.essid
 
-    # Check dependencies
     if not check_dependency("aireplay-ng") or not check_dependency("airodump-ng"):
         colored_log(
             "error", "aireplay-ng and airodump-ng are required to decloak SSID!"
@@ -364,7 +341,6 @@ def decloak_ssid(self, network: WiFiNetwork) -> str | None:
     )
     output_file = os.path.join(self.temp_dir, "decloak-01.csv")
 
-    # Start airodump-ng to capture probe requests
     proc = subprocess.Popen(
         [
             "airodump-ng",
@@ -382,11 +358,10 @@ def decloak_ssid(self, network: WiFiNetwork) -> str | None:
         stderr=subprocess.DEVNULL,
     )
 
-    # Send deauth packets to force clients to reconnect
     deauth_cmd = [
         "aireplay-ng",
         "--deauth",
-        "10",  # Send 10 deauth packets
+        "10",
         "-a",
         network.bssid,
         self.monitor_interface,
@@ -402,14 +377,13 @@ def decloak_ssid(self, network: WiFiNetwork) -> str | None:
         return None
 
     try:
-        time.sleep(10)  # Wait for clients to reconnect and send probe requests
+        time.sleep(10)
     except KeyboardInterrupt:
         colored_log("warning", "Decloaking stopped by user!")
     finally:
         proc.send_signal(signal.SIGTERM)
         proc.wait()
 
-    # Parse CSV to find SSID
     if os.path.exists(output_file):
         try:
             with open(output_file, "r", encoding="utf-8", errors="replace") as f:
@@ -441,20 +415,17 @@ def decloak_ssid(self, network: WiFiNetwork) -> str | None:
 
 def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> list[str]:
     """Detect connected clients to the target network"""
-    # Check dependencies
     if not check_dependency("airodump-ng"):
         colored_log("error", "airodump-ng is required!")
         return []
 
     output_file = os.path.join(self.temp_dir, "client-scan")
 
-    # Clean up old files
     for ext in ["-01.csv", "-01.cap", "-01.kismet.csv", "-01.kismet.netxml", "-01.log.csv"]:
         old_file = output_file + ext
         if os.path.exists(old_file):
             os.remove(old_file)
 
-    # Start airodump-ng in background
     proc = subprocess.Popen(
         [
             "airodump-ng",
@@ -468,7 +439,6 @@ def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> 
         stderr=subprocess.DEVNULL,
     )
 
-    # Show progress countdown with Rich
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
     
     clients = []
@@ -489,7 +459,6 @@ def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> 
             for i in range(duration):
                 time.sleep(1)
                 
-                # Live update of detected clients
                 current_clients = []
                 csv_file = f"{output_file}-01.csv"
                 if os.path.exists(csv_file):
@@ -504,23 +473,16 @@ def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> 
                                 continue
                             if client_section and line:
                                 parts = [p.strip() for p in line.split(",")]
-                                # Basic validation: MAC length and BSSID match
                                 if len(parts) >= 6:
                                     client_mac = parts[0].strip()
                                     client_bssid = parts[5].strip()
                                     
-                                    # Validate MAC format (simple check)
                                     if len(client_mac) == 17 and ":" in client_mac:
-                                        # Filter by BSSID to ensure it belongs to target
-                                        # (Allow if BSSID matches target OR if we are targeting a specific BSSID via airodump)
-                                        # Note: airodump --bssid filters capture, but checking here is safer.
                                         if client_bssid == network.bssid:
                                             current_clients.append(client_mac)
                     except:
                         pass
                 
-                # Update description with live count
-                # Update description with live count
                 for client in current_clients:
                     if client not in clients:
                         clients.append(client)
@@ -535,8 +497,6 @@ def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> 
         proc.send_signal(signal.SIGTERM)
         proc.wait()
 
-    # Final parse to ensure we get everything (redundant but safe)
-    # Re-read the file one last time to catch any clients that might have appeared at the very end
     csv_file = f"{output_file}-01.csv"
     if os.path.exists(csv_file):
         try:
@@ -560,10 +520,8 @@ def detect_connected_clients(self, network: WiFiNetwork, duration: int = 10) -> 
         except Exception as e:
             colored_log("error", f"Error reading client detection results: {e}!")
     
-    # Remove duplicates
     clients = list(set(clients))
     
-    # Debug log to confirm what is being returned
     if clients:
         colored_log("success", f"Detected {len(clients)} connected clients!")
     else:
