@@ -43,7 +43,8 @@
 
 ## Screenshot
 
-![Screenshot Example](https://github.com/user-attachments/assets/ffa191b6-de9f-49dc-9b01-4b9f62615479)
+![Screenshot Example](https://github.com/user-attachments/assets/e490e4bc-78bd-4bd4-bca3-fab95c8d7d2a)
+![Screenshot Example](https://github.com/user-attachments/assets/1794b6d1-5311-4334-95cf-7ff833ea68d4)
 
 ---
 
