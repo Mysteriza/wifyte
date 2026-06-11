@@ -95,7 +95,7 @@ sudo python3 main.py
 To run with **root privileges** (required) while using the virtual environment:
 
 ```bash
-sudo ./.venv/bin/python3 main.py
+sudo ./venv/bin/python3 main.py
 ```
 
 Or if you installed dependencies globally:
