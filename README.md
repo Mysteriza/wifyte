@@ -6,24 +6,27 @@
 
 **Wifyte** is an optimized Python-based WiFi penetration testing tool for capturing WPA/WPA2 handshakes and cracking passwords. Inspired by [Wifite2](https://github.com/derv82/wifite2), built with speed, accuracy, and a modern UI powered by **Rich**.
 
+Now with **hashcat GPU acceleration** for ~100× faster cracking!
+
 ---
 
 ## ✨ Key Features
 
 ### 🎯 **Core Functionality**
 - **WPA/WPA2 Handshake Capture** - Fast and reliable handshake capturing
-- **Password Cracking** - Dictionary-based password recovery with aircrack-ng
+- **Dual Cracking Backends** - aircrack-ng (CPU) **+** hashcat (GPU) with auto-fallback
+- **GPU Acceleration** - Auto-detect discrete/integrated GPU for optimal hashcat tuning
 - **HIDDEN SSID Detection & Decloaking** - Automatically detect and reveal hidden networks
 - **Multi-Target Support** - Capture multiple networks in one session
 - **Smart VM Detection** - Accurate detection with USB adapter identification
 
-### 🚀 **Optimization Features** (New!)
+### 🚀 **Optimization Features**
 - **Continuous Real-Time Scanning** - Live network table with dynamic updates (wifite2-style)
 - **Rich Modern UI** - Beautiful panels, tables, and progress indicators
 - **Fast Parallel Deauth** - Threading-based deauthentication for quick handshakes
 - **Intelligent Client Detection** - 15-second scan with progress tracking
-- **Vendor Identification** - MAC address vendor lookup with graceful fallback
-- **Sequential Network IDs** - Auto-sorted by signal strength (1-N)
+- **Auto-Setup** - Automatic dependency installation, wordlist download, GPU detection
+- **File Logging** - Rotating debug logs (`logs/debug_log_*.txt`) with Rich console output
 
 ### 🛡️ **Safety & Reliability**
 - **Smart Interface Detection** - Automatic WiFi adapter selection with validation
@@ -32,39 +35,21 @@
 - **Signal Handlers** - Proper Ctrl+C handling with graceful cleanup
 - **Temporary File Management** - Auto-cleanup of capture files
 
-### 🎨 **User Experience**
-- **Interactive Interface** - Ctrl+C to stop scanning, not exit
-- **Progress Tracking** - Real-time countdowns and progress bars
-- **Color-Coded Output** - Signal strength visualization
-- **Client MAC Tables** - Formatted display of detected devices
-- **Detailed Results** - Saved reports with timestamps
-
----
-
-## Screenshot
-
-![Screenshot Example](https://github.com/user-attachments/assets/e490e4bc-78bd-4bd4-bca3-fab95c8d7d2a)
-![Screenshot Example](https://github.com/user-attachments/assets/1794b6d1-5311-4334-95cf-7ff833ea68d4)
-
 ---
 
 ## 📋 Requirements
 
-- **OS**: Linux (Debian/Ubuntu/Kali recommended)
+- **OS**: Linux (Debian/Ubuntu/Kali recommended), Windows (partial support)
 - **Python**: 3.10+
 - **Tools**: aircrack-ng suite (airmon-ng, airodump-ng, aireplay-ng, aircrack-ng)
-- **Privileges**: Root/sudo access required
+- **Optional**: hashcat 7.1.2+ (auto-downloaded if missing) with compatible GPU
+- **Privileges**: Root/sudo access required (Linux)
 - **Wi-Fi Adapter**: Monitor-mode capable (e.g., TP-Link TL-WN722N V1, ALFA AWUS036ACS, AR9271)
 
 ### Python Dependencies
 
 ```bash
-pip install rich mac-vendor-lookup
-```
-
-Or using `uv` (recommended):
-```bash
-uv pip install rich mac-vendor-lookup
+pip install -r requirements.txt
 ```
 
 ---
@@ -82,7 +67,7 @@ cd wifyte
 # Install Python dependencies
 sudo python3 -m pip install -r requirements.txt
 
-# Run the tool
+# Run the tool (auto-setup handles wordlist download, GPU detection, hashcat)
 sudo python3 main.py
 ```
 
@@ -92,70 +77,37 @@ sudo python3 main.py
 
 ### Basic Usage
 
-To run with **root privileges** (required) while using the virtual environment:
-
-```bash
-sudo ./venv/bin/python3 main.py
-```
-
-Or if you installed dependencies globally:
 ```bash
 sudo python3 main.py
 ```
 
+With custom wordlist:
+```bash
+sudo python3 main.py --wordlist /path/to/rockyou.txt
+```
+
+Force hashcat (GPU):
+```bash
+sudo python3 main.py --hashcat
+```
+
+Force aircrack-ng (CPU):
+```bash
+sudo python3 main.py --no-hashcat
+```
+
 ### Workflow
 
-1. **Interface Selection** - Auto-detects WiFi adapters (internal/external)
-2. **Monitor Mode** - Automatically enables monitor mode
-3. **Network Scanning** - Continuous live scan (press Ctrl+C when ready)
-4. **Target Selection** - Choose one or multiple networks (e.g., "1, 2, 5")
-5. **Client Detection** - 15s scan with progress bar
-6. **Deauthentication** - Parallel threading for speed
-7. **Handshake Capture** - Real-time monitoring (~3-5s detection)
-8. **Password Cracking** - Dictionary attack with aircrack-ng
-9. **Results** - Saved to `results/` directory
-
----
-
-## 🎯 Example Session
-
-```
-WiFi Handshake Capture & Cracking Tool
-
-[*] Available WiFi Interfaces:
-  [1] wlp1s0 (Internal) - ⚠️ Likely unsupported!
-  [2] wlx18d6c70831ae (External)
-[?] Select interface: 2
-
-[+] Monitor mode active on wlan0mon
-
-╭─────────── 14 Networks Found - Scanning... ───────────╮
-│ ID │ SSID          │ CH │ PWR  │ ENC       │ VENDOR │
-├────┼───────────────┼────┼──────┼───────────┼────────┤
-│ 1  │ HomeNetwork   │ 7  │ 61%  │ WPA2 CCMP │ ZTE    │
-│ 2  │ <HIDDEN SSID> │ 11 │ 57%  │ WPA2      │ Huawei │
-╰────────────────────────────────────────────────────────╯
-
-[?] Select Targets: 1
-
-⠋ Scanning for clients ████████████████ 15/15s
-
-╭───────── ✓ 5 Client(s) Detected ─────────╮
-│  #  │ Client MAC          │
-│  1  │ 98:AF:65:17:C9:FB   │
-│  2  │ 0C:98:38:DA:4F:9D   │
-╰──────────────────────────────────────────╯
-
-[*] Deauthenticating clients...
-[+] Deauthentication completed!
-
-📡 Capturing handshake for HomeNetwork...
-⏱ Time: 5s / 60s | Remaining: 00:55
-✓ Handshake detected!
-
-[*] Cracking password...
-[+] Password found: mypassword123
-```
+1. **Auto-Setup** - Detects GPU, downloads wordlist, installs dependencies
+2. **Interface Selection** - Auto-detects WiFi adapters (internal/external)
+3. **Monitor Mode** - Automatically enables monitor mode
+4. **Network Scanning** - Continuous live scan (press Ctrl+C when ready)
+5. **Target Selection** - Choose one or multiple networks (e.g., "1, 2, 5")
+6. **Client Detection** - 15s scan with progress bar
+7. **Deauthentication** - Parallel threading for speed
+8. **Handshake Capture** - Real-time monitoring (~3-5s detection)
+9. **Password Cracking** - hashcat (GPU) → aircrack-ng (CPU) fallback
+10. **Results** - Saved to `results/` directory
 
 ---
 
@@ -164,15 +116,31 @@ WiFi Handshake Capture & Cracking Tool
 ```
 wifyte/
 ├── main.py              # Entry point & orchestration
-├── interface.py         # Interface detection & monitor mode
-├── scanner.py           # Network scanning & client detection
-├── capture.py           # Handshake capture logic
-├── cracker.py           # Password cracking
-├── utils.py             # Helper functions
-├── wifyte.txt           # Default wordlist
+├── src/
+│   ├── __init__.py      # Package marker
+│   ├── config.py        # Centralised constants & paths
+│   ├── console.py       # Rich console + file logging
+│   ├── backend.py       # CrackerBackend Protocol
+│   ├── gpu.py           # GPU detection (discrete/integrated)
+│   ├── validator.py     # Handshake validation (scapy EAPOL)
+│   ├── utils.py         # General utilities & vendor lookup
+│   ├── interface.py     # Interface detection & monitor mode
+│   ├── scanner.py       # Network scanning & client detection
+│   ├── capture.py       # Handshake capture logic
+│   ├── cracker.py       # Cracking orchestration + AircrackBackend
+│   ├── setup.py         # Auto-setup pipeline
+│   └── hashcat/
+│       ├── __init__.py  # Package re-exports
+│       ├── convert.py   # .cap → .hc22000 conversion (scapy)
+│       ├── setup.py     # Hashcat binary discovery & kernel warmup
+│       └── crack.py     # HashcatBackend (GPU cracking)
+├── wifyte.txt           # Default wordlist (auto-downloaded)
 ├── handshakes/          # Captured handshakes (.cap)
+├── hc22000_cache/       # Converted hashcat hashes
 ├── results/             # Cracking results (.txt)
-└── temp/                # Temporary scan files
+├── logs/                # Debug logs
+├── bin/                 # Downloaded binaries (hashcat, aircrack-ng)
+└── deps/                # Downloaded archives
 ```
 
 ---
