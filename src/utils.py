@@ -238,6 +238,11 @@ def extract_local_zip(zip_path: str, extract_to: str, subdir: str | None = None)
     try:
         os.makedirs(extract_to, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as zf:
+            # Validate ZIP
+            bad = zf.testzip()
+            if bad:
+                colored_log("error", f"Corrupt ZIP: {bad}")
+                return False
             for member in zf.namelist():
                 if subdir and not member.startswith(subdir):
                     continue
@@ -254,6 +259,7 @@ def extract_local_zip(zip_path: str, extract_to: str, subdir: str | None = None)
         colored_log("success", f"Extracted '{os.path.basename(zip_path)}'.")
         return True
     except Exception as e:
+        colored_log("error", f"Extraction failed: {e}")
         log_error(f"Extraction failed: {zip_path}", e)
         return False
 

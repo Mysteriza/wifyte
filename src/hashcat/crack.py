@@ -11,16 +11,14 @@ Exports:
 """
 
 import os
-import re
 import sys
 import time
-import threading
 import subprocess
 from typing import Optional
 
 from src.console import console, colored_log, log_error, log_debug
 from src.config import RESULTS_DIR
-from src.utils import sanitize_ssid
+from src.utils import sanitize_ssid, lower_process_priority
 from src.hashcat.convert import convert_cap_to_hc22000
 from src.hashcat.setup import (
     get_hashcat_path, is_hashcat_available, warmup_hashcat_kernel,
@@ -41,42 +39,49 @@ HASHCAT_EXHAUSTED = _ExhaustedType()
 
 # ── Potfile reader ──────────────────────────────────────────────────────
 
-_POTFILE = os.path.join(os.path.expanduser("~"), ".hashcat", "hashcat.potfile")
-_POTFILE_LOCK = threading.Lock()
+def _read_potfile_raw(path: str) -> set[str]:
+    """Read all lines from a potfile into a set."""
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return set(f.read().splitlines())
+    except Exception:
+        return set()
 
 
-def _read_potfile(bssid: str, essid: str) -> str | None:
+def _extract_password_from_lines(lines: set[str]) -> str | None:
     """
-    Search the hashcat potfile for a matching network.
+    Extract a valid password (8-63 chars) from potfile lines.
 
-    Returns the password (everything after the last ``:``) or None.
+    Password is the segment after the last ``:`` that does not start with ``#``.
     """
-    if not os.path.exists(_POTFILE):
-        return None
-    bssid_upper = bssid.upper().replace("-", ":")
-    with _POTFILE_LOCK:
-        try:
-            with open(_POTFILE, "r", encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split(":")
-                    if len(parts) >= 3:
-                        # Format: hash:bssid:password
-                        pw = parts[-1]
-                        stored_bssid = parts[-2].upper().replace("-", ":")
-                        if stored_bssid == bssid_upper:
-                            return pw
-        except OSError:
-            pass
+    for line in lines:
+        if ":" in line and not line.startswith("#"):
+            pw = line[line.rfind(":") + 1:].strip()
+            if 8 <= len(pw) <= 63:
+                return pw
+    return None
+
+
+def _check_new_potfile_entry(potfile: str, before: set[str]) -> str | None:
+    """Check if any new entries were added to the potfile, return password."""
+    after = _read_potfile_raw(potfile)
+    new_entries = after - before
+    if new_entries:
+        pw = _extract_password_from_lines(new_entries)
+        if pw:
+            return pw
+    # Fallback: check full potfile (in case it was replaced)
+    if not before:
+        return _extract_password_from_lines(after)
     return None
 
 
 # ── Core cracking function ─────────────────────────────────────────────
 
-_crack_spinner_messages = [
-    "Loading kernel into GPU...",
+_HASHCAT_MESSAGES = [
+    "Initializing kernel into GPU...",
     "Computing PMK for each word...",
     "Running fast hash comparison...",
     "Testing candidate passwords...",
@@ -113,94 +118,161 @@ def crack_with_hashcat(
         log_error("Hashcat binary not found.")
         return None
 
-    warmup_hashcat_kernel(hc22000_path)
-
     # Build command
     cmd = [
         hashcat_bin,
         "-m", "22000",
         "-a", "0",
-        "--status", "--status-timer=1",
+        "-w", "4" if gpu_is_discrete else "2",
     ]
     if gpu_is_discrete:
         cmd.append("-O")   # Optimised kernel (faster, less compatible)
-    cmd.extend([hc22000_path, wordlist_path])
+    cmd.extend(["--session", sanitize_ssid(display_essid),
+                hc22000_path, wordlist_path])
 
-    colored_log("info", f"Running hashcat for {display_essid}...")
+    hc_dir = os.path.dirname(hashcat_bin)
+    potfile = os.path.join(os.path.expanduser("~"), ".hashcat", "hashcat.potfile")
+
+    # Warm up GPU kernel (compilation may take 30-90 seconds first run)
+    colored_log("info", f"Warming up GPU kernel for {display_essid}...")
+    warmup_hashcat_kernel(hc22000_path)
+
     log_debug(f"Hashcat command: {' '.join(cmd)}")
 
-    spinner_stop = threading.Event()
-    spinner = threading.Thread(
-        target=_hashcat_spinner, args=(spinner_stop,), daemon=True,
-    )
-    spinner.start()
+    # Kill any lingering hashcat processes
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/f", "/im", "hashcat.exe"],
+                           capture_output=True, timeout=10)
+        else:
+            subprocess.run(["pkill", "-9", "-x", "hashcat"],
+                           capture_output=True, timeout=10)
+    except Exception:
+        pass
+
+    # Read potfile before cracking
+    potfile_before = _read_potfile_raw(potfile)
 
     start_time = time.time()
+    proc = None
+
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=3600,
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+            cwd=hc_dir,
         )
-    except subprocess.TimeoutExpired:
-        colored_log("error", "Hashcat timed out (1 hour).")
+        if proc.stdout is None:
+            raise RuntimeError("stdout pipe not created")
+
+        kernel_init_done = False
+        msg_idx = 0
+        last_msg_switch = time.time()
+        hashcat_output: list[str] = []
+
+        # Use Rich status for clean single-line display
+        from rich.console import Console as _Console
+        status = console.status(
+            f"Hashcat compiling GPU kernels for [bold]{display_essid}[/]...",
+            spinner="dots",
+        )
+        status.start()
+
+        try:
+            for raw_line in proc.stdout:
+                line = raw_line.rstrip()
+                hashcat_output.append(line)
+
+                # Detect kernel init done (first non-empty line that isn't the hash itself)
+                if not kernel_init_done and line and not line.startswith("WPA*02*"):
+                    kernel_init_done = True
+                    # Lower process priority after kernel compilation
+                    try:
+                        lower_process_priority(proc.pid)
+                    except Exception:
+                        pass
+                    status.update(
+                        description=f"Cracking [bold]{display_essid}[/] with hashcat..."
+                    )
+
+                # Rotate message every 8 seconds
+                now = time.time()
+                if now - last_msg_switch >= 8:
+                    msg_idx = (msg_idx + 1) % len(_HASHCAT_MESSAGES)
+                    last_msg_switch = now
+                    if kernel_init_done:
+                        status.update(
+                            description=f"{_HASHCAT_MESSAGES[msg_idx]} [bold]{display_essid}[/]"
+                        )
+        finally:
+            status.stop()
+
+        proc.wait()
+
+        elapsed = time.time() - start_time
+        log_debug(f"Hashcat finished in {elapsed:.1f}s, rc={proc.returncode}")
+
+        # Check potfile for new entries
+        password = _check_new_potfile_entry(potfile, potfile_before)
+
+        if password:
+            m, s = divmod(int(elapsed), 60)
+            time_str = f"{m:02d}:{s:02d}"
+            colored_log("success",
+                        f"Password found for {display_essid}: [bold]{password}[/bold]")
+            console.print(f"  - Time: {time_str}", style="green")
+            console.print(f"  - Method: hashcat (GPU)", style="green")
+            return password
+
+        # Exhausted? (all candidates tested)
+        combined = "\n".join(hashcat_output)
+        if "Exhausted" in combined or "All hashes" in combined:
+            console.print(f"  Wordlist exhausted — password not found.")
+            return HASHCAT_EXHAUSTED
+
+        console.print(f"  Hashcat did not find the password.")
         return None
-    finally:
-        spinner_stop.set()
-        spinner.join(timeout=1)
 
-    elapsed = time.time() - start_time
-    log_debug(f"Hashcat finished in {elapsed:.1f}s")
-
-    # Check if exhausted (all candidates tested)
-    stdout = proc.stdout or ""
-    stderr = proc.stderr or ""
-    combined = stdout + stderr
-    exhausted = "Exhausted" in combined or "All hashes" in combined
-
-    # Read potfile
-    password = _read_potfile(hc22000_path, display_essid)
-
-    if password:
-        m, s = divmod(int(elapsed), 60)
-        time_str = f"{m:02d}:{s:02d}"
-        colored_log("success",
-                    f"Password found for {display_essid}: [bold]{password}[/bold]")
-        console.print(f"  - Time: {time_str}", style="green")
-        console.print(f"  - Method: hashcat (GPU)", style="green")
-        return password
-
-    if exhausted:
-        console.print(f"  Wordlist exhausted — password not found.")
+    except FileNotFoundError as e:
+        log_error("Hashcat binary not found", e)
+        return None
+    except PermissionError as e:
+        colored_log("warning",
+                    "Hashcat blocked by Windows Defender. "
+                    "Add an exception for the 'bin/' folder or disable Real-time protection.")
+        log_error("Hashcat blocked by system (PermissionError)", e)
+        return None
+    except KeyboardInterrupt:
+        if proc:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        colored_log("warning", "Hashcat cracking interrupted by user.")
         return HASHCAT_EXHAUSTED
-
-    console.print(f"  Hashcat did not find the password.")
-    return None
-
-
-# ── Spinner ─────────────────────────────────────────────────────────────
-
-def _hashcat_spinner(stop: threading.Event):
-    chars = ["-", "\\", "|", "/"]
-    msg_idx = 0
-    char_idx = 0
-    last_switch = time.time()
-    while not stop.is_set():
-        msg = _crack_spinner_messages[msg_idx % len(_crack_spinner_messages)]
-        console.print(f"  {chars[char_idx % 4]} {msg}", style="bright_cyan", end="\r")
-        sys.stdout.flush()
-        char_idx += 1
-        now = time.time()
-        if now - last_switch >= 6:
-            msg_idx += 1
-            last_switch = now
-        time.sleep(0.15)
-    console.print(" " * 80, end="\r")
-    sys.stdout.flush()
+    except Exception as e:
+        if proc:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        log_error("Hashcat execution failed", e)
+        return None
 
 
 # ── Backend class ──────────────────────────────────────────────────────
 
 class HashcatBackend:
     """Hashcat-based cracking backend (GPU)."""
+
+    def __init__(
+        self,
+        gpu_is_discrete: bool = False,
+        packets_map: dict | None = None,
+    ):
+        self.gpu_is_discrete = gpu_is_discrete
+        self.packets_map = packets_map or {}
 
     def crack(
         self,
@@ -212,6 +284,7 @@ class HashcatBackend:
         Convert, warm up, crack, and return the password.
 
         Accepts a .cap file (conversion happens internally).
+        Uses pre-loaded packets from validator when available.
         """
         # Convert .cap → .hc22000
         hc22000_dir = HCOV_DIR
@@ -219,11 +292,15 @@ class HashcatBackend:
         safe = sanitize_ssid(display_essid)
         hc22000_path = os.path.join(hc22000_dir, f"{safe}.hc22000")
 
-        if not convert_cap_to_hc22000(handshake_path, hc22000_path):
+        packets = self.packets_map.get(handshake_path)
+        if not convert_cap_to_hc22000(handshake_path, hc22000_path, packets):
             colored_log("warning", "Hashcat conversion failed.")
             return None
 
-        result = crack_with_hashcat(hc22000_path, wordlist_path, display_essid)
+        result = crack_with_hashcat(
+            hc22000_path, wordlist_path, display_essid,
+            gpu_is_discrete=self.gpu_is_discrete,
+        )
 
         # Cleanup
         try:

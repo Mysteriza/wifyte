@@ -107,4 +107,7 @@ def log_error(message: str, error: Exception | None = None):
     logger.error(message)
     if error:
         logger.error(traceback.format_exc())
-    colored_log("error", message)
+    if error:
+        colored_log("error", f"{message}: {error}")
+    else:
+        colored_log("error", message)

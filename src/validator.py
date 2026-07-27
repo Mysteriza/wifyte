@@ -20,15 +20,28 @@ class ValidationResult:
     """Wraps a validation outcome for one capture file."""
 
     filepath: str
-    valid: bool
+    is_valid: bool = False
+    has_m1: bool = False
+    has_m2: bool = False
+    has_m3: bool = False
+    has_m4: bool = False
+    error: str | None = None
     essid: str | None = None
     bssid: str | None = None
-    eapol_messages: list[str] = field(default_factory=list)
+    relevant_packets: list = field(default_factory=list)
+
+    @property
+    def valid(self) -> bool:
+        return self.is_valid
 
     def __str__(self) -> str:
-        icon = "[green]✓[/green]" if self.valid else "[red]✗[/red]"
-        essid_str = self.essid or "?"
-        return f"{icon} {os.path.basename(self.filepath)} — {essid_str} [{', '.join(self.eapol_messages)}]"
+        icon = "[green]✓[/green]" if self.is_valid else "[red]✗[/red]"
+        parts = []
+        if self.has_m1: parts.append("M1")
+        if self.has_m2: parts.append("M2")
+        if self.has_m3: parts.append("M3")
+        if self.has_m4: parts.append("M4")
+        return f"{icon} {os.path.basename(self.filepath)} — [{', '.join(parts)}] {self.essid or '?'}"
 
 
 # ── Scapy-based classification ─────────────────────────────────────────
@@ -37,35 +50,40 @@ def _classify_eapol(packet) -> str | None:
     """
     Classify an EAPOL frame as M1, M2, M3, or M4 based on key-info flags.
 
-    Returns ``"M1"``, ``"M2"``, ``"M3"``, ``"M4"``, or ``None``.
+    Uses Scapy's high-level ``EAPOL_KEY`` fields (``key_ack``, ``has_key_mic``,
+    ``install``, ``secure``) matching the reference implementation from
+    handshakeCracker.
+
+    +-------+---------+---------+---------+--------+
+    | Frame | Key ACK | Key MIC | Install | Secure |
+    +-------+---------+---------+---------+--------+
+    | M1    | 1       | 0       | 0       | 0      |
+    | M2    | 0       | 1       | 0       | 0      |
+    | M3    | 1       | 1       | 1       | 1      |
+    | M4    | 0       | 1       | 0       | 1      |
+    +-------+---------+---------+---------+--------+
     """
     try:
-        from scapy.layers.eap import EAPOL
-        from scapy.layers.dot11 import Dot11
+        from scapy.layers.eap import EAPOL_KEY
     except ImportError:
         return None
 
-    if not packet.haslayer(EAPOL):
+    if not packet.haslayer(EAPOL_KEY):
         return None
-    eapol = packet[EAPOL]
+    ek = packet[EAPOL_KEY]
 
-    try:
-        key_info = eapol.load[1]
-    except (IndexError, TypeError):
-        return None
+    ack = bool(ek.key_ack)
+    mic = bool(ek.has_key_mic)
+    ins = bool(ek.install)
+    sec = bool(ek.secure)
 
-    ack    = bool(key_info & 0x80)   # bit 7
-    mic    = bool(key_info & 0x01)   # bit 0
-    install = bool(key_info & 0x40)  # bit 6
-    secure = bool(key_info & 0x08)   # bit 3
-
-    if not ack and not mic and not install:
+    if ack and not mic and not ins and not sec:
         return "M1"
-    if ack and mic and not install:
+    if not ack and mic and not ins and not sec:
         return "M2"
-    if ack and mic and install:
+    if ack and mic and ins and sec:
         return "M3"
-    if ack and mic and secure:
+    if not ack and mic and not ins and sec:
         return "M4"
     return None
 
@@ -76,57 +94,78 @@ def validate_handshake(filepath: str) -> ValidationResult:
     """
     Open a .cap / .pcap file and classify EAPOL frames found inside.
 
-    A handshake is considered **valid** if at least two distinct EAPOL
-    message types are present (e.g. M1 + M2 + …).
+    A handshake is considered **valid** if it contains **M1 AND M2** EAPOL
+    frames (M3/M4 are optional bonuses).  References the same validation
+    logic as handshakeCracker.
     """
-    result = ValidationResult(filepath=filepath, valid=False)
+    result = ValidationResult(filepath=filepath)
 
     if not os.path.exists(filepath):
+        result.error = "file not found"
         return result
 
     try:
-        from scapy.utils import rdpcap
+        from scapy.all import PcapReader
+        from scapy.layers.dot11 import Dot11Beacon, Dot11ProbeResp, Dot11Elt
+        from scapy.layers.eap import EAPOL_KEY
     except ImportError:
+        result.error = "scapy not available"
         log_error("scapy is required for handshake validation.")
         return result
 
     try:
-        packets = rdpcap(filepath)
+        with PcapReader(filepath) as pcap:
+            for pkt in pcap:
+                if pkt.haslayer(EAPOL_KEY):
+                    result.relevant_packets.append(pkt)
+                    msg = _classify_eapol(pkt)
+                    if msg == "M1":
+                        result.has_m1 = True
+                    elif msg == "M2":
+                        result.has_m2 = True
+                    elif msg == "M3":
+                        result.has_m3 = True
+                    elif msg == "M4":
+                        result.has_m4 = True
+                elif pkt.haslayer(Dot11Beacon) or pkt.haslayer(Dot11ProbeResp):
+                    result.relevant_packets.append(pkt)
+                    # Extract ESSID from beacon
+                    if not result.essid and pkt.haslayer(Dot11Elt):
+                        elt = pkt[Dot11Elt]
+                        while elt:
+                            if elt.ID == 0 and elt.info:
+                                try:
+                                    result.essid = elt.info.decode("utf-8", errors="replace")
+                                except Exception:
+                                    result.essid = elt.info.hex()
+                                break
+                            elt = elt.payload if isinstance(elt.payload, Dot11Elt) else None
+                    if not result.bssid and pkt.haslayer(Dot11Beacon):
+                        from scapy.layers.dot11 import Dot11
+                        result.bssid = pkt[Dot11].addr3
     except Exception as e:
-        log_debug(f"scapy failed to read {filepath}: {e}")
+        result.error = f"cannot read pcap: {e}"
         return result
 
-    seen: set[str] = set()
-
-    for pkt in packets:
-        msg = _classify_eapol(pkt)
-        if msg and msg not in seen:
-            seen.add(msg)
-            result.eapol_messages.append(msg)
-
-    result.valid = len(seen) >= 2
-
-    # Try to extract ESSID / BSSID from first packet
-    if packets:
-        try:
-            from scapy.layers.dot11 import Dot11, Dot11Elt
-            p = packets[0]
-            if p.haslayer(Dot11):
-                result.bssid = p[Dot11].addr3
-            if p.haslayer(Dot11Elt):
-                for elt in p[Dot11Elt]:
-                    if elt.ID == 0:  # SSID
-                        result.essid = elt.info.decode("utf-8", errors="replace")
-                        break
-        except Exception:
-            pass
-
+    result.is_valid = result.has_m1 and result.has_m2
     return result
 
 
-def validate_all_handshakes(file_list: list[str]) -> tuple[dict[str, ValidationResult], list[str]]:
+def _build_messages_list(result: ValidationResult) -> str:
+    """Build a compact M1/M2/M3/M4 string for display."""
+    parts = []
+    if result.has_m1: parts.append("M1")
+    if result.has_m2: parts.append("M2")
+    if result.has_m3: parts.append("M3")
+    if result.has_m4: parts.append("M4")
+    return ", ".join(parts) if parts else "-"
+
+
+def validate_all_handshakes(
+    file_list: list[str],
+) -> tuple[dict[str, ValidationResult], list[str]]:
     """
-    Validate every file in *file_list*.
+    Validate every file in *file_list* and print an ASCII table.
 
     Returns:
         (valid_map, invalid_paths)
@@ -146,7 +185,7 @@ def validate_all_handshakes(file_list: list[str]) -> tuple[dict[str, ValidationR
         table.add_row(
             os.path.basename(fpath),
             res.essid or "?",
-            ", ".join(res.eapol_messages) or "-",
+            _build_messages_list(res),
             status,
         )
         if res.valid:
@@ -155,4 +194,5 @@ def validate_all_handshakes(file_list: list[str]) -> tuple[dict[str, ValidationR
             invalid.append(fpath)
 
     console.print(table)
+    console.print(f"  {len(valid_map)} valid, {len(invalid)} invalid")
     return valid_map, invalid

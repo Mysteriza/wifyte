@@ -257,8 +257,17 @@ def warmup_hashcat_kernel(hc22000_path: str | None = None) -> bool:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300,
         )
+        success = proc.returncode == 0
     except subprocess.TimeoutExpired:
-        pass
+        log_debug("Kernel warm-up timed out — continuing anyway.")
+        success = False
+    except PermissionError:
+        colored_log("warning", "Hashcat blocked by system (antivirus?). Warm-up skipped.")
+        log_debug("PermissionError during warm-up — continuing anyway.")
+        success = False
+    except Exception as e:
+        log_debug(f"Kernel warm-up failed: {e} — continuing anyway.")
+        success = False
     finally:
         spinner_stop.set()
         spinner.join(timeout=1)
@@ -270,8 +279,9 @@ def warmup_hashcat_kernel(hc22000_path: str | None = None) -> bool:
         except OSError:
             pass
 
-    colored_log("success", "Hashcat kernel cache warmed up.")
-    return True
+    if success:
+        colored_log("success", "Hashcat kernel cache warmed up.")
+    return success
 
 
 def _warmup_spinner(stop: threading.Event):
