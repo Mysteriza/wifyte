@@ -1,113 +1,186 @@
 ![Repository Size](https://img.shields.io/github/repo-size/Mysteriza/wifyte)
-![Python Version](https://img.shields.io/badge/python-3.12-blue)
+![Python Version](https://img.shields.io/badge/python-3.10+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-# Wifyte - WiFi Handshake Capture & Cracking Tool
+# Wifyte — WiFi Handshake Capture & Cracking Tool
 
-**Wifyte** is an optimized Python-based WiFi penetration testing tool for capturing WPA/WPA2 handshakes and cracking passwords. Inspired by [Wifite2](https://github.com/derv82/wifite2), built with speed, accuracy, and a modern UI powered by **Rich**.
+> **If you only need to crack an existing handshake (no capture), consider the simpler companion tool:
+> [handshakeCracker](https://github.com/Mysteriza/handshakeCracker)** — GPU-accelerated WPA/WPA2
+> cracker using hashcat + aircrack-ng, without the capture workflow.
 
-Now with **hashcat GPU acceleration** for ~100× faster cracking!
+**Wifyte** is an all-in-one WiFi penetration testing tool that captures WPA/WPA2 handshakes and
+cracks passwords. It combines a full capture pipeline (scan, deauth, capture) with dual-backend
+cracking — **hashcat (GPU)** for speed, **aircrack-ng (CPU)** as fallback.
+
+Inspired by [Wifite2](https://github.com/derv82/wifite2), built for modern hardware with a Rich
+terminal UI.
 
 ---
 
-## ✨ Key Features
+## 🔗 Companion Tool
 
-### 🎯 **Core Functionality**
-- **WPA/WPA2 Handshake Capture** - Fast and reliable handshake capturing
-- **Dual Cracking Backends** - aircrack-ng (CPU) **+** hashcat (GPU) with auto-fallback
-- **GPU Acceleration** - Auto-detect discrete/integrated GPU for optimal hashcat tuning
-- **HIDDEN SSID Detection & Decloaking** - Automatically detect and reveal hidden networks
-- **Multi-Target Support** - Capture multiple networks in one session
-- **Smart VM Detection** - Accurate detection with USB adapter identification
+| Tool | Purpose |
+|------|---------|
+| **[handshakeCracker](https://github.com/Mysteriza/handshakeCracker)** | Crack-only — supply a `.cap` file and wordlist, no WiFi adapter needed. Ideal for Windows users. |
+| **Wifyte (this repo)** | Full pipeline — scan, capture, **and** crack. Requires Linux + monitor-mode adapter for capture. |
 
-### 🚀 **Optimization Features**
-- **Continuous Real-Time Scanning** - Live network table with dynamic updates (wifite2-style)
-- **Rich Modern UI** - Beautiful panels, tables, and progress indicators
-- **Fast Parallel Deauth** - Threading-based deauthentication for quick handshakes
-- **Intelligent Client Detection** - 15-second scan with progress tracking
-- **Auto-Setup** - Automatic dependency installation, wordlist download, GPU detection
-- **File Logging** - Rotating debug logs (`logs/debug_log_*.txt`) with Rich console output
+---
 
-### 🛡️ **Safety & Reliability**
-- **Smart Interface Detection** - Automatic WiFi adapter selection with validation
-- **Monitor Mode Management** - Safe enable/disable with cleanup handlers
-- **NetworkManager Handling** - Selective stopping (VM-aware)
-- **Signal Handlers** - Proper Ctrl+C handling with graceful cleanup
-- **Temporary File Management** - Auto-cleanup of capture files
+## ✨ Features
+
+### 🎯 Capture & Scanning
+- **WPA/WPA2 Handshake Capture** — fast deauthentication-based capture with parallel threading
+- **Continuous Live Scanning** — real-time network table (Rich) with signal sorting, vendor lookup
+- **Hidden SSID Decloaking** — automatically detect and reveal hidden networks
+- **Multi-Target Support** — capture multiple networks in a single session
+- **Client Detection** — 15-second probe with progress tracking
+- **Smart VM Detection** — accurate virtual-machine adapter identification
+
+### ⚡ Cracking Backends
+- **hashcat (GPU)** — mode 22000, auto-detects discrete vs integrated GPU for optimal flags (`-O` / `--optimized-kernel-enable`)
+- **aircrack-ng (CPU)** — parallel wordlist chunking using all CPU cores, auto-fallback when GPU unavailable
+- **Automatic Fallback** — hashcat → aircrack-ng if conversion fails or password not found
+- **Potfile Lookup** — skips already-cracked passwords via `~/.hashcat/hashcat.potfile`
+
+### 🧰 Automation & Setup
+- **Auto-Setup** — on first run: installs Python deps, downloads hashcat (`.tar.gz`, no 7-Zip needed), fetches wordlist, detects GPU
+- **Offline / Windows Mode** — skip capture, crack existing `.cap` / `.pcap` / `.pcapng` files directly
+- **File Logging** — rotating debug logs (`logs/debug_log_*.txt`, keeps last 3)
+- **Auto-Cleanup** — signal handlers restore monitor mode, remove temp files
+
+### 🖥️ User Interface
+- **Rich Terminal UI** — coloured logs, tables, panels, live displays, spinners
+- **Multi-Target Deduplication** — same SSID password verified once, not re-cracked
+- **Result Saving** — cracked passwords written to `results/<essid>_result.txt`
 
 ---
 
 ## 📋 Requirements
 
-- **OS**: Linux (Debian/Ubuntu/Kali recommended), Windows (partial support)
-- **Python**: 3.10+
-- **Tools**: aircrack-ng suite (airmon-ng, airodump-ng, aireplay-ng, aircrack-ng)
-- **Optional**: hashcat 7.1.2+ (auto-downloaded if missing) with compatible GPU
-- **Privileges**: Root/sudo access required (Linux)
-- **Wi-Fi Adapter**: Monitor-mode capable (e.g., TP-Link TL-WN722N V1, ALFA AWUS036ACS, AR9271)
+### Full Functionality (Linux)
 
-### Python Dependencies
+| Requirement | Details |
+|-------------|---------|
+| **OS** | Linux (Debian, Ubuntu, Kali, Arch recommended) |
+| **Python** | 3.10+ |
+| **Wi-Fi Adapter** | Monitor-mode capable (e.g., TP-Link TL-WN722N V1, ALFA AWUS036ACS, AR9271) |
+| **Tools** | `aircrack-ng` suite (`airmon-ng`, `airodump-ng`, `aireplay-ng`, `aircrack-ng`) |
+| **Optional** | hashcat 7.1.2+ (auto-downloaded), compatible GPU (AMD/NVIDIA/Intel) |
+| **Privileges** | Root/sudo (required for monitor mode and packet injection) |
 
-```bash
-pip install -r requirements.txt
-```
+### Windows (Cracking Only)
+
+| Requirement | Details |
+|-------------|---------|
+| **OS** | Windows 10 / 11 |
+| **Python** | 3.10+ |
+| **Tools** | `aircrack-ng.exe` (auto-extracted from bundled ZIP if present in `deps/`) |
+| **Optional** | hashcat 7.1.2+ (auto-downloaded), compatible GPU |
+
+> **⚠️ Windows cannot capture handshakes** — Windows does not support monitor mode or packet
+> injection. Use `--offline` to crack an existing `.cap` / `.pcap` / `.pcapng` file captured
+> elsewhere (e.g., from Linux, Raspberry Pi, or OpenWrt).
 
 ---
 
 ## 🚀 Installation
 
-```bash
-# Install aircrack-ng suite
-sudo apt update && sudo apt install aircrack-ng
+### Linux (Full Capture + Cracking)
 
-# Clone repository
+```bash
+# 1. Install aircrack-ng suite
+sudo apt update && sudo apt install aircrack-ng
+# (or: sudo pacman -S aircrack-ng on Arch)
+
+# 2. Clone the repository
 git clone https://github.com/Mysteriza/wifyte.git
 cd wifyte
 
-# Install Python dependencies
+# 3. Install Python dependencies
 sudo python3 -m pip install -r requirements.txt
 
-# Run the tool (auto-setup handles wordlist download, GPU detection, hashcat)
+# 4. Run — auto-setup downloads wordlist, hashcat, detects GPU
 sudo python3 main.py
 ```
+
+### Windows (Cracking Only)
+
+```powershell
+# 1. Clone the repository
+git clone https://github.com/Mysteriza/wifyte.git
+cd wifyte
+
+# 2. Install Python dependencies
+python -m pip install -r requirements.txt
+
+# 3. (Optional) Download aircrack-ng for CPU cracking
+#    Place aircrack-ng-1.7-win.zip in the deps/ folder.
+#    The program will auto-extract it on startup.
+
+# 4. Run with an existing handshake file
+python main.py --offline handshakes\my_capture.pcap
+```
+
+> On Windows the program automatically detects the OS and skips all capture-related steps.
+> No administrator privileges are needed for cracking.
 
 ---
 
 ## 📖 Usage
 
-### Basic Usage
+### Basic (Linux — Full Workflow)
 
 ```bash
 sudo python3 main.py
 ```
 
-With custom wordlist:
+Follow the interactive prompts:
+
+1. **Auto-Setup** — GPU detection, wordlist download, hashcat download
+2. **Interface** — select your WiFi adapter from the list
+3. **Scan** — live network table; press `Ctrl+C` when ready
+4. **Select Targets** — e.g., `1, 3, 5` to attack multiple networks
+5. **Capture** — tool detects clients, sends deauth frames, captures handshake
+6. **Crack** — hashcat GPU → aircrack-ng CPU fallback → password displayed
+
+### Windows / Offline — Cracking Only
+
 ```bash
-sudo python3 main.py --wordlist /path/to/rockyou.txt
+# Provide an existing handshake file
+python main.py --offline handshakes/my_capture.pcap
+
+# Or just run without --offline on Windows; the tool will auto-detect
+# any .cap / .pcap / .pcapng file in the handshakes/ directory
+python main.py
 ```
 
-Force hashcat (GPU):
+### Command-Line Options
+
+| Argument | Description |
+|----------|-------------|
+| `--wordlist PATH` | Path to wordlist (default: `wifyte.txt`) |
+| `--hashcat` | Force hashcat GPU cracking |
+| `--no-hashcat` | Force aircrack-ng CPU cracking |
+| `--offline FILE` | Crack an existing `.cap`/`.pcap`/`.pcapng` file (skip scan/capture) |
+
+### Examples
+
 ```bash
+# Use a custom wordlist
+sudo python3 main.py --wordlist /usr/share/wordlists/rockyou.txt
+
+# GPU-only cracking (Linux)
 sudo python3 main.py --hashcat
-```
 
-Force aircrack-ng (CPU):
-```bash
+# CPU-only cracking on a headless system
 sudo python3 main.py --no-hashcat
+
+# Windows: crack a capture from a Raspberry Pi
+python main.py --offline C:\captures\corner_wifi.pcap
+
+# Windows: use a specific wordlist with hashcat
+python main.py --offline handshakes\corner_wifi.pcap --hashcat --wordlist wifyte.txt
 ```
-
-### Workflow
-
-1. **Auto-Setup** - Detects GPU, downloads wordlist, installs dependencies
-2. **Interface Selection** - Auto-detects WiFi adapters (internal/external)
-3. **Monitor Mode** - Automatically enables monitor mode
-4. **Network Scanning** - Continuous live scan (press Ctrl+C when ready)
-5. **Target Selection** - Choose one or multiple networks (e.g., "1, 2, 5")
-6. **Client Detection** - 15s scan with progress bar
-7. **Deauthentication** - Parallel threading for speed
-8. **Handshake Capture** - Real-time monitoring (~3-5s detection)
-9. **Password Cracking** - hashcat (GPU) → aircrack-ng (CPU) fallback
-10. **Results** - Saved to `results/` directory
 
 ---
 
@@ -115,80 +188,83 @@ sudo python3 main.py --no-hashcat
 
 ```
 wifyte/
-├── main.py              # Entry point & orchestration
+├── main.py                # Entry point & orchestration
+├── requirements.txt       # Python dependencies
+├── wifyte.txt             # Default wordlist (auto-updated)
+├── README.md              # This file
+├── .gitignore
+│
 ├── src/
-│   ├── __init__.py      # Package marker
-│   ├── config.py        # Centralised constants & paths
-│   ├── console.py       # Rich console + file logging
-│   ├── backend.py       # CrackerBackend Protocol
-│   ├── gpu.py           # GPU detection (discrete/integrated)
-│   ├── validator.py     # Handshake validation (scapy EAPOL)
-│   ├── utils.py         # General utilities & vendor lookup
-│   ├── interface.py     # Interface detection & monitor mode
-│   ├── scanner.py       # Network scanning & client detection
-│   ├── capture.py       # Handshake capture logic
-│   ├── cracker.py       # Cracking orchestration + AircrackBackend
-│   ├── setup.py         # Auto-setup pipeline
+│   ├── __init__.py        # Package marker (v2.0.0)
+│   ├── config.py          # Constants, paths, versions, URLs
+│   ├── console.py         # Rich console + rotating file logging
+│   ├── backend.py         # CrackerBackend Protocol
+│   ├── gpu.py             # GPU detection (discrete / integrated)
+│   ├── validator.py       # Handshake validation via scapy EAPOL
+│   ├── utils.py           # Helpers: vendor lookup, download, spinner
+│   ├── interface.py       # WiFi interface detection & monitor mode
+│   ├── scanner.py         # Network scanning, client detection
+│   ├── capture.py         # Deauth & handshake capture
+│   ├── cracker.py         # Cracking orchestration + AircrackBackend
+│   ├── setup.py           # Auto-setup pipeline
 │   └── hashcat/
-│       ├── __init__.py  # Package re-exports
-│       ├── convert.py   # .cap → .hc22000 conversion (scapy)
-│       ├── setup.py     # Hashcat binary discovery & kernel warmup
-│       └── crack.py     # HashcatBackend (GPU cracking)
-├── wifyte.txt           # Default wordlist (auto-downloaded)
-├── handshakes/          # Captured handshakes (.cap)
-├── hc22000_cache/       # Converted hashcat hashes
-├── results/             # Cracking results (.txt)
-├── logs/                # Debug logs
-├── bin/                 # Downloaded binaries (hashcat, aircrack-ng)
-└── deps/                # Downloaded archives
+│       ├── __init__.py    # Re-exports
+│       ├── convert.py     # .cap → .hc22000 (scapy EAPOL parsing)
+│       ├── setup.py       # Binary discovery, download, kernel warmup
+│       └── crack.py       # HashcatBackend (GPU cracking)
+│
+├── handshakes/            # Captured handshake files (.cap / .pcap)
+├── hc22000_cache/         # Converted hashcat-format hashes
+├── results/               # Cracked passwords (.txt)
+├── logs/                  # Debug logs (auto-rotating, keeps 3)
+├── bin/                   # Downloaded binaries (hashcat, aircrack-ng)
+└── deps/                  # Downloaded archives (hashcat .tar.gz, aircrack-ng .zip)
 ```
+
+---
+
+## ⚠️ Platform Limitations
+
+### Linux 🐧 — Full Support
+- ✅ Monitor mode & packet injection
+- ✅ Network scanning & client detection
+- ✅ Deauthentication & handshake capture
+- ✅ hashcat GPU cracking
+- ✅ aircrack-ng CPU cracking
+
+### Windows 🪟 — Cracking Only
+- ❌ **No monitor mode** — Windows does not support raw 802.11 monitor mode
+- ❌ **No packet injection** — cannot send deauth frames
+- ❌ **No handshake capture**
+- ✅ Cracking existing handshakes via hashcat (GPU) or aircrack-ng (CPU)
+- ✅ Automatic detection of `.cap` / `.pcap` / `.pcapng` files in `handshakes/`
+- ✅ Offline mode (`--offline` flag)
+
+> If you only need to crack handshake files on Windows (or any OS), check out
+> **[handshakeCracker](https://github.com/Mysteriza/handshakeCracker)** — a lighter tool
+> focused purely on cracking without the capture pipeline.
 
 ---
 
 ## 🔧 Configuration
 
+Key constants in `src/config.py`:
+
+| Constant | Default | Description |
+|----------|---------|-------------|
+| `CAPTURE_TIMEOUT` | 60 s | Max wait for handshake |
+| `CLIENT_DETECTION_DURATION` | 15 s | Client probe duration |
+| `SINGLE_SCAN_DURATION` | 8 s | Legacy scan duration |
+| `DEAUTH_COUNT` | 10 | Deauth frames per client |
+| `HASHCAT_VERSION` | 7.1.2 | Hashcat version to download |
+
 ### Wordlist
 
-Default: `wifyte.txt` (included)
+Default wordlist: `wifyte.txt` (downloaded automatically on first run, checked for updates).
 
-Custom wordlist:
-```python
-# In main.py, modify:
-self.wordlist = "/path/to/your/wordlist.txt"
-```
-
-Popular wordlists:
-- rockyou.txt - `/usr/share/wordlists/rockyou.txt`
-- SecLists - https://github.com/danielmiessler/SecLists
-
-### Scan Duration
-
-Client detection: 15 seconds (configurable)
-```python
-# In capture.py:
-clients = detect_connected_clients(self, network, duration=15)
-```
-
----
-
-## 🎨 Features Showcase
-
-### Live Network Scanning
-- **Continuous updates** without scrolling
-- **Ctrl+C** stops scan, not program
-- **Auto-sorted** by signal strength
-- **Vendor lookup** for each BSSID
-- **HIDDEN SSID** detection and decloaking
-
-### Client Detection
-- **Progress bar** with countdown
-- **15-second scan** for better accuracy
-- **Rich table display** of MACs
-
-### Handshake Capture
-- **Fast detection** (~3-5 seconds typical)
-- **Parallel deauth** using threading
-- **Real-time countdown** with styled output
+Popular alternatives:
+- **rockyou.txt** — `/usr/share/wordlists/rockyou.txt` (Kali) or [download](https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt)
+- **SecLists** — [github.com/danielmiessler/SecLists](https://github.com/danielmiessler/SecLists)
 
 ---
 
@@ -197,18 +273,19 @@ clients = detect_connected_clients(self, network, duration=15)
 **FOR EDUCATIONAL PURPOSES ONLY**
 
 This tool is intended for:
-- Authorized penetration testing
-- Security research on YOUR OWN networks
-- Educational purposes in controlled environments
+- Authorized penetration testing with written permission
+- Security research on **YOUR OWN** networks and devices
+- Educational purposes in controlled lab environments
 
 **UNAUTHORIZED ACCESS TO NETWORKS IS ILLEGAL**
 
-Users are responsible for compliance with local laws. The author assumes no liability for misuse.
+Users are responsible for complying with all applicable local, state, and federal laws.
+The author assumes **no liability** for any misuse or damage caused by this tool.
 
-By using this tool, you agree to:
-- Use it only on networks for which you have explicit permission
-- Refrain from illegal, malicious, or unauthorized activities
-- Understand that misuse may violate applicable laws
+By using this tool you agree to:
+- Use it only on networks you own or have explicit written permission to test
+- Refrain from any illegal, malicious, or unauthorized activities
+- Accept full responsibility for your actions
 
 ---
 
@@ -218,11 +295,11 @@ By using this tool, you agree to:
 
 **Problem**: No WiFi interfaces detected
 ```bash
-# Check interfaces
+# Check available wireless interfaces
 iwconfig
 ip link
 
-# Ensure wireless tools installed
+# Ensure wireless tools are installed
 sudo apt install wireless-tools
 ```
 
@@ -231,88 +308,46 @@ sudo apt install wireless-tools
 # Kill interfering processes
 sudo airmon-ng check kill
 
-# Manual monitor mode
+# Manually enable monitor mode
 sudo ip link set wlan0 down
 sudo iw dev wlan0 set type monitor
 sudo ip link set wlan0 up
 ```
 
-### Capture Issues
+### GPU / Hashcat Issues
 
-**Problem**: No clients detected
-- Ensure network has active clients
-- Increase scan duration to 20-30s
-- Try different times of day
+**Problem**: Hashcat not using GPU
+- Ensure GPU drivers are installed (AMD ROCm, NVIDIA CUDA, or Intel OpenCL)
+- Run `sudo python3 main.py --hashcat` to force GPU mode
+- Check `logs/debug_log_*.txt` for detection details
 
-**Problem**: Handshake not captured
-- Ensure clients reconnect after deauth
-- Check capture file manually: `aircrack-ng handshake.cap`
-- Verify network encryption (WPA/WPA2 only)
+**Problem**: "Incomplete handshake" during conversion
+- The `.cap` file does not contain a full 4-way handshake (need at least M1 + M2)
+- Recapture the handshake ensuring the client connects during capture
 
-### VM Environment
+### Windows Issues
 
-**Problem**: USB adapter not recognized
-- Ensure USB passthrough enabled
-- Check adapter in VMware/VirtualBox settings
-- Verify driver support: `lsusb` and `dmesg`
+**Problem**: Windows Defender blocks aircrack-ng.exe
+- Add an exclusion for the `bin/` and `deps/` folders in Windows Security
+- Or use `--hashcat` to skip aircrack-ng entirely
+
+**Problem**: hashcat .7z extraction fails (no 7-Zip)
+- The program now downloads `.tar.gz` by default, extracted with Python's built-in `tarfile` — no 7-Zip required
+- If the `.tar.gz` download fails, it falls back to `.7z` (still requires 7-Zip for that path)
 
 ---
 
 ## 🤝 Contributing
 
-Contributions welcome! Please:
-1. Fork the repository
-2. Create feature branch
-3. Commit changes
-4. Push to branch
-5. Create Pull Request
+Contributions, issues, and feature requests are welcome. Feel free to open an issue or submit a pull request.
 
 ---
 
-## 📜 License
+## 🙏 Acknowledgements
 
-MIT License - see LICENSE file
-
----
-
-## 🙏 Credits
-
-- **aircrack-ng** - Core WiFi tools
-- **Rich** - Beautiful terminal UI
-- **mac-vendor-lookup** - MAC address vendor database
-- **Wifite2** - Inspiration for workflow and features
-
----
-
-## 📝 Changelog
-
-### v2.0 (Latest) - Optimization Release
-- ✨ Continuous real-time scanning with live display
-- ✨ Rich modern UI (panels, tables, progress bars)
-- ✨ Improved VM detection (no false positives)
-- ✨ Vendor lookup with graceful fallback
-- ✨ 15-second client detection with progress
-- ✨ Sequential network IDs sorted by signal
-- 🐛 Fixed Ctrl+C behavior during scanning
-- 🐛 Fixed screen clearing issues
-- ⚡ Maintained original fast capture speed
-- ⚡ Threading-based parallel deauthentication
-
-### v1.0 - Initial Release
-- Basic handshake capture & cracking
-- Monitor mode management
-- Client detection & deauthentication
-- HIDDEN SSID decloaking
-- Multi-target support
-
----
-
-## 📧 Contact
-
-For issues, questions, or suggestions:
-- **GitHub Issues**: [Wifyte Issues](https://github.com/Mysteriza/wifyte/issues)
-- **GitHub**: [@Mysteriza](https://github.com/Mysteriza)
-
----
-
-**Happy Ethical Hacking! 🔐**
+- [Wifite2](https://github.com/derv82/wifite2) — original inspiration
+- [hashcat](https://hashcat.net/hashcat/) — GPU-accelerated password recovery
+- [aircrack-ng](https://www.aircrack-ng.org/) — de facto WiFi security tools
+- [Rich](https://github.com/Textualize/rich) — beautiful terminal formatting
+- [scapy](https://scapy.net/) — packet manipulation for handshake conversion
+- [mac-vendor-lookup](https://github.com/bauerj/mac_vendor_lookup) — MAC vendor database
