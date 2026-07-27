@@ -1,5 +1,9 @@
 """
-Hashcat binary discovery — check PATH, download & extract 7z, warm up GPU kernel.
+Hashcat binary discovery — check PATH, download & extract tar.gz, warm up GPU kernel.
+
+Downloads ``.tar.gz`` from hashcat.net (extractable with Python's built-in
+``tarfile`` — no external archiver needed). Falls back to ``.7z`` from
+GitHub if the tar.gz is unavailable (still requires 7-Zip for that path).
 
 The warm-up step is critical: the first hashcat run after a driver update
 or new GPU install takes 30-60 seconds compiling OpenCL kernels. We cache
@@ -133,28 +137,27 @@ def ensure_hashcat() -> bool:
             colored_log("success", f"Hashcat found locally: {_hashcat_path}")
             return True
 
-    # 4. Download (try .7z first, fall back to .tar.gz)
+    # 4. Download tar.gz (extractable with Python's built-in tarfile — no 7-Zip needed)
     colored_log("info", "Hashcat not found. Downloading...")
     os.makedirs(DEPS_DIR, exist_ok=True)
     extract_dir = os.path.join(BIN_DIR, "hashcat")
 
-    # Try .7z with 7-Zip first
-    archive_7z = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.7z")
-    if download_with_progress(HASHCAT_URL_7Z, archive_7z, "Hashcat", HASHCAT_7Z_SHA256):
-        if _extract_archive(archive_7z, extract_dir):
-            if _locate_hashcat(extract_dir):
-                return True
-        colored_log("info", "7z extraction failed, trying tar.gz fallback...")
-    else:
-        colored_log("info", "7z download failed, trying tar.gz fallback...")
-
-    # Fallback: .tar.gz (extractable with Python's built-in tarfile)
     archive_tgz = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.tar.gz")
-    if not download_with_progress(HASHCAT_URL_TARGZ, archive_tgz, "Hashcat (tar.gz)"):
-        log_error("Failed to download hashcat (both 7z and tar.gz).")
+    if not download_with_progress(HASHCAT_URL_TARGZ, archive_tgz, "Hashcat"):
+        # Fallback: try 7z from GitHub in case tar.gz is unavailable
+        colored_log("info", "tar.gz download failed, trying 7z fallback (requires 7-Zip)...")
+        archive_7z = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.7z")
+        if not download_with_progress(HASHCAT_URL_7Z, archive_7z, "Hashcat", HASHCAT_7Z_SHA256):
+            log_error("Failed to download hashcat.")
+            return False
+        if not _extract_archive(archive_7z, extract_dir):
+            return False
+        if _locate_hashcat(extract_dir):
+            return True
+        log_error("Hashcat binary not found after 7z extraction.")
         return False
 
-    # Extract tar.gz with Python's tarfile
+    # Extract tar.gz with Python's built-in tarfile
     import tarfile
     try:
         os.makedirs(extract_dir, exist_ok=True)
@@ -168,7 +171,7 @@ def ensure_hashcat() -> bool:
     if _locate_hashcat(extract_dir):
         return True
 
-    log_error("Hashcat binary not found after extraction.")
+    log_error("Hashcat binary not found after tar.gz extraction.")
     return False
 
 
