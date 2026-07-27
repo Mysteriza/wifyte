@@ -5,7 +5,6 @@ plus the parallel AircrackBackend implementation.
 
 import os
 import re
-import sys
 import math
 import time
 import atexit
@@ -15,7 +14,7 @@ import subprocess
 
 from src.console import console, colored_log, log_error, log_debug
 from src.config import RESULTS_DIR
-from src.utils import sanitize_ssid, lower_process_priority, loading_spinner
+from src.utils import sanitize_ssid, lower_process_priority
 from src.backend import CrackerBackend
 from src.hashcat import (
     is_hashcat_available,
@@ -155,7 +154,6 @@ def _save_result(network, password: str, method: str):
 #  AircrackBackend (parallel CPU cracking)
 # ═══════════════════════════════════════════════════════════════════════
 
-_SPINNER_CHARS = ["-", "\\", "|", "/"]
 _active_procs: list[subprocess.Popen] = []
 _active_procs_lock = threading.Lock()
 _cached_chunks: dict[str, list[str]] = {}
@@ -192,16 +190,6 @@ def _cleanup_chunks():
 
 atexit.register(_terminate_all)
 atexit.register(_cleanup_chunks)
-
-
-def _write_status(spin: str, msg: str):
-    sys.stdout.write(f"\r  {spin} {msg}".ljust(110) + "\r")
-    sys.stdout.flush()
-
-
-def _clear_status():
-    sys.stdout.write("\r" + " " * 110 + "\r")
-    sys.stdout.flush()
 
 
 def _crack_worker(chunk_path: str, handshake_path: str, results: list):
@@ -244,22 +232,7 @@ class AircrackBackend:
         wordlist_path: str,
         display_essid: str,
     ) -> str | None:
-        messages = [
-            f"Cracking {display_essid}... Initialising packet analyzer...",
-            f"Cracking {display_essid}... Extracting handshake from capture...",
-            f"Cracking {display_essid}... Loading wordlist into memory...",
-            f"Cracking {display_essid}... Brute-forcing PMK computation...",
-            f"Cracking {display_essid}... Testing key combinations...",
-            f"Cracking {display_essid}... Almost there, checking matches...",
-        ]
-        msg_idx = 0
-        spin_idx = 0
         start_time = time.time()
-        last_switch = start_time
-
-        _write_status(_SPINNER_CHARS[spin_idx % 4], messages[msg_idx])
-        spin_idx += 1
-
         found_results: list[str] = []
 
         # Split wordlist into chunks
@@ -299,15 +272,18 @@ class AircrackBackend:
             t.start()
             threads.append(t)
 
-        while not found_results and any(t.is_alive() for t in threads):
-            if time.time() - last_switch >= 6:
-                msg_idx = (msg_idx + 1) % len(messages)
-                last_switch = time.time()
-            _write_status(_SPINNER_CHARS[spin_idx % 4], messages[msg_idx])
-            spin_idx += 1
-            time.sleep(0.15)
-
-        _clear_status()
+        # ── Wait silently with a single-line Rich status ──────────
+        from rich.console import Console as _Console
+        status = console.status(
+            f"Cracking [bold]{display_essid}[/] with aircrack-ng...",
+            spinner="dots",
+        )
+        status.start()
+        try:
+            while not found_results and any(t.is_alive() for t in threads):
+                time.sleep(0.5)
+        finally:
+            status.stop()
 
         for t in threads:
             if t.is_alive():
