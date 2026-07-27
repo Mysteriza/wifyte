@@ -1,4 +1,41 @@
+# ── Python ───────────────────────────────────────────────────
 __pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
 .venv
-/handshakes
-/results
+.venv*/
+.pytest_cache/
+
+# ── Environment ──────────────────────────────────────────────
+.env
+.env.*
+
+# ── Downloaded / auto-generated data ─────────────────────────
+/handshakes/
+/results/
+/hc22000_cache/
+/logs/
+/bin/
+/deps/*
+!/deps/aircrack-ng-1.7-win.zip
+/manuf
+/wifyte.txt
+
+# ── Capture & crack artifacts ────────────────────────────────
+*.cap
+*.hc22000
+*.potfile
+*~.hashcat.potfile
+
+# ── IDE & OS metadata ────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

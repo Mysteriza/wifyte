@@ -1,353 +1,386 @@
 #!/usr/bin/env python3
+"""
+Wifyte — WiFi Handshake Capture & Cracking Tool
+
+Usage:
+    sudo python main.py [-w WORDLIST] [--hashcat] [--no-hashcat]
+    python main.py --offile CAP_FILE [-w WORDLIST] [--hashcat]
+
+Orchestrates the full workflow:
+    1. Auto-setup (check deps, GPU, wordlist)
+    2. Interface selection & monitor mode (Linux only)
+    3. Network scanning (live continuous) (Linux only)
+    4. Handshake capture (deauth + airodump-ng) (Linux only)
+    5. Password cracking (hashcat GPU → aircrack-ng CPU fallback)
+
+Use --offline on Windows to crack existing .cap files directly.
+"""
+
 import argparse
 import os
 import sys
-import tempfile
-import shutil
 import signal
 import atexit
-from interface import setup_interface, toggle_monitor_mode
-from scanner import scan_networks_continuous, decloak_ssid
-from capture import capture_handshake
-from cracker import crack_password
-from utils import (
-    colored_log,
-    execute_command,
-    select_target,
-    _display_banner,
-    _exit_program,
-    sanitize_ssid,
-    check_dependency,
-    console,
-)
+import tempfile
+import shutil
 
+from src.console import console, colored_log, log_error, log_debug
+from src.config import (
+    HANDSHAKES_DIR, RESULTS_DIR, LOGS_DIR, DEFAULT_WORDLIST_PATH,
+    IS_LINUX, IS_WINDOWS,
+)
+from src.utils import (
+    display_banner, select_target, sanitize_ssid, check_dependency,
+    execute_command, create_default_wordlist,
+)
+from src.interface import setup_interface, toggle_monitor_mode
+from src.scanner import scan_networks_continuous, decloak_ssid
+from src.capture import capture_handshake
+from src.cracker import crack_password
+from src.setup import auto_setup
+
+
+# ── Cleanup manager (same role as original) ─────────────────────────────
 
 class CleanupManager:
-    """Manages cleanup operations to ensure safe exit in all scenarios"""
-    
-    def __init__(self):
-        self.monitor_interface = None
-        self.original_interface = None
-        self.interface_info = None
-        self.cleanup_registered = False
-        self.cleanup_done = False
-        
-    def register(self, original_interface, monitor_interface, interface_info):
-        """Register interfaces for cleanup"""
-        self.original_interface = original_interface
-        self.monitor_interface = monitor_interface
-        self.interface_info = interface_info
-        
-        if not self.cleanup_registered:
-            self.original_sigint_handler = signal.signal(signal.SIGINT, self._signal_handler)
-            self.original_sigterm_handler = signal.signal(signal.SIGTERM, self._signal_handler)
-            
-            atexit.register(self._atexit_cleanup)
-            
-            self.cleanup_registered = True
-    
-    def pause_signal_handlers(self):
-        """Temporarily disable signal handlers (for continuous scanning)"""
-        if self.cleanup_registered:
-            signal.signal(signal.SIGINT, signal.default_int_handler)
-            signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    
-    def resume_signal_handlers(self):
-        """Re-enable signal handlers after scanning"""
-        if self.cleanup_registered:
-            signal.signal(signal.SIGINT, self._signal_handler)
-            signal.signal(signal.SIGTERM, self._signal_handler)
-    
-    def _signal_handler(self, signum, frame):
-        """Handle SIGINT (Ctrl+C) and SIGTERM"""
-        signal_name = "SIGINT (Ctrl+C)" if signum == signal.SIGINT else "SIGTERM"
-        colored_log("warning", f"\n{signal_name} received - cleaning up safely...")
-        self._cleanup()
-        colored_log("info", "Cleanup completed. Exiting...")
-        sys.exit(0)
-    
-    def _atexit_cleanup(self):
-        """Cleanup called by atexit on program termination"""
-        if not self.cleanup_done:
-            self._cleanup()
-    
-    def _cleanup(self):
-        """Perform actual cleanup operations"""
-        if self.cleanup_done or not self.monitor_interface:
-            return
-        
-        self.cleanup_done = True
-        
-        try:
-            colored_log("info", "Disabling monitor mode and restoring network...")
-            
-            success = toggle_monitor_mode(
-                self.monitor_interface,
-                enable=False,
-                interface_info=self.interface_info
-            )
-            
-            if success:
-                colored_log("success", "Network interfaces restored successfully!")
-            else:
-                is_external = self.interface_info and self.interface_info.get('likely_external', False)
-                if not is_external:
-                    colored_log("warning", "Monitor mode disable failed - attempting NetworkManager restart...")
-                    try:
-                        execute_command(["service", "NetworkManager", "restart"])
-                        colored_log("success", "NetworkManager restarted as fallback")
-                    except:
-                        pass
-                else:
-                    colored_log("warning", "Monitor mode disable reported issues (external adapter - no NetworkManager restart needed)")
-        except Exception as e:
-            colored_log("error", f"Cleanup error: {e}")
-            is_external = self.interface_info and self.interface_info.get('likely_external', False)
-            if not is_external:
-                try:
-                    execute_command(["service", "NetworkManager", "restart"])
-                    colored_log("warning", "Forced NetworkManager restart")
-                except:
-                    colored_log("error", "Could not restore network - manual intervention may be needed")
+    """Manages safe teardown of monitor mode on SIGINT/SIGTERM/exit."""
 
+    def __init__(self):
+        self.monitor_interface: str | None = None
+        self.original_interface: str | None = None
+        self.interface_info: dict | None = None
+        self.cleanup_done = False
+
+    def register(self, original: str | None, monitor: str | None, info: dict | None):
+        self.original_interface = original
+        self.monitor_interface = monitor
+        self.interface_info = info
+        signal.signal(signal.SIGINT, self._handler)
+        signal.signal(signal.SIGTERM, self._handler)
+        atexit.register(self._atexit)
+
+    def pause(self):
+        """Temporarily restore default SIGINT (for continuous scan)."""
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+    def resume(self):
+        signal.signal(signal.SIGINT, self._handler)
+        signal.signal(signal.SIGTERM, self._handler)
+
+    def _handler(self, signum, _frame):
+        name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
+        colored_log("warning", f"\n{name} received — cleaning up...")
+        self.cleanup()
+        sys.exit(0)
+
+    def _atexit(self):
+        if not self.cleanup_done:
+            self.cleanup()
+
+    def cleanup(self):
+        if self.cleanup_done:
+            return
+        self.cleanup_done = True
+        if not self.monitor_interface:
+            return
+        colored_log("info", "Disabling monitor mode...")
+        try:
+            toggle_monitor_mode(self.monitor_interface, enable=False,
+                                interface_info=self.interface_info)
+        except Exception as e:
+            log_error("Cleanup error", e)
+            if not (self.interface_info and self.interface_info.get("likely_external")):
+                execute_command(["service", "NetworkManager", "restart"])
+
+
+# ── Main application class ──────────────────────────────────────────────
 
 class Wifyte:
-    def __init__(self):
-        self.interface = None
-        self.interface_info = None
-        self.monitor_interface = None
-        self.networks = []
-        self.temp_dir = tempfile.mkdtemp()
-        self.handshake_dir = os.path.join(os.getcwd(), "handshakes")
-        self.results_dir = os.path.join(os.getcwd(), "results")
-        os.makedirs(self.handshake_dir, exist_ok=True)
-        os.makedirs(self.results_dir, exist_ok=True)
-        self.stop_capture = False
-        self.handshake_found = False
-        self.cleanup_manager = CleanupManager()
+    """Core application — orchestrates the full capture-and-crack flow."""
 
-        parser = argparse.ArgumentParser(
-            description="WiFi Handshake Capture & Cracking Tool"
-        )
-        parser.add_argument(
-            "--wordlist", "-w", type=str, help="Path to custom wordlist file"
-        )
-        args = parser.parse_args()
+    def __init__(self, args: argparse.Namespace):
+        self.interface: str | None = None
+        self.interface_info: dict | None = None
+        self.monitor_interface: str | None = None
+        self.networks: list = []
+        self.temp_dir = tempfile.mkdtemp(prefix="wifyte_")
+        self.wordlist_path: str = DEFAULT_WORDLIST_PATH
+        self.offline_cap: str | None = None
+        self.use_hashcat: bool | None = None
+        self.hashcat_discrete_gpu = True
+        self.cleanup = CleanupManager()
 
+        # ── Apply CLI args ────────────────────────────────────────
         if args.wordlist:
-            self.wordlist_path = os.path.abspath(args.wordlist)
-            if not os.path.exists(self.wordlist_path):
-                colored_log(
-                    "error", f"Custom wordlist not found at {self.wordlist_path}"
-                )
+            path = os.path.abspath(args.wordlist)
+            if not os.path.exists(path):
+                colored_log("error", f"Wordlist not found: {path}")
                 sys.exit(1)
-            colored_log("success", f"Using custom wordlist: {self.wordlist_path}")
-        else:
-            self.wordlist_path = os.path.join(os.getcwd(), "wifyte.txt")
-            if not os.path.exists(self.wordlist_path):
-                colored_log("warning", f"Wordlist not found in {self.wordlist_path}")
-                colored_log("warning", "Creating default wordlist...")
-                with open(self.wordlist_path, "w") as f:
-                    f.write("password\n12345678\nqwerty123\nadmin123\nwifi12345\n")
-                colored_log("success", "Default wordlist created!")
+            self.wordlist_path = path
+            colored_log("success", f"Using custom wordlist: {path}")
+
+        if args.offline:
+            path = os.path.abspath(args.offline)
+            if not os.path.exists(path):
+                colored_log("error", f"Capture file not found: {path}")
+                sys.exit(1)
+            self.offline_cap = path
+            colored_log("success", f"Offline mode — using capture: {path}")
+
+        if args.hashcat:
+            self.use_hashcat = True
+        elif args.no_hashcat:
+            self.use_hashcat = False
+        # None = auto-detect at crack time
 
     def __del__(self):
         try:
-            shutil.rmtree(self.temp_dir)
-        except Exception as e:
-            colored_log("error", f"Error clearing temp directory: {e}")
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    # ── Run ───────────────────────────────────────────────────────
 
     def run(self):
-        """Main program flow with support for multiple targets"""
         os.system("cls" if os.name == "nt" else "clear")
-        _display_banner()
+        display_banner()
 
+        # ── 1. Auto-setup ─────────────────────────────────────────
+        setup_result = auto_setup()
+
+        # Store backend hints from detection
+        if self.use_hashcat is None:
+            self.use_hashcat = setup_result.get("use_hashcat", False)
+        self.hashcat_discrete_gpu = setup_result.get("gpu_is_discrete", True)
+
+        # Ensure wordlist exists
+        if not os.path.exists(self.wordlist_path):
+            create_default_wordlist(self.wordlist_path)
+
+        # ── 2. Offline / Live mode ────────────────────────────────
+        if self.offline_cap or IS_WINDOWS:
+            # Offline / Windows mode: skip capture, crack directly
+            cap_path = self.offline_cap
+            if not cap_path:
+                # Look for existing handshake files in handshakes/
+                handshakes_dir = HANDSHAKES_DIR
+                import glob as _glob
+                caps = _glob.glob(os.path.join(handshakes_dir, "*.cap"))
+                caps += _glob.glob(os.path.join(handshakes_dir, "*.pcap"))
+                caps += _glob.glob(os.path.join(handshakes_dir, "*.pcapng"))
+                if caps:
+                    cap_path = caps[0]
+                    colored_log("info", f"Using existing handshake: {cap_path}")
+                else:
+                    colored_log("error",
+                        "No handshake file found (.cap / .pcap / .pcapng). "
+                        "Use --offline PATH_TO_CAP to crack an existing capture.")
+                    colored_log("info",
+                        "Or run on Linux with a WiFi adapter to "
+                        "scan & capture directly.")
+                    return
+
+            # Extract ESSID from filename or use basename
+            essid = os.path.splitext(os.path.basename(cap_path))[0]
+            from src.scanner import WiFiNetwork
+            mock_target = WiFiNetwork(
+                id=1, bssid="00:00:00:00:00:00",
+                channel=0, power=0, essid=essid, encryption="WPA2",
+            )
+
+            colored_log("info", f"Offline/Windows mode — cracking: {cap_path}")
+            pw = crack_password(cap_path, self.wordlist_path, mock_target,
+                                use_hashcat=self.use_hashcat,
+                                has_discrete_gpu=self.hashcat_discrete_gpu)
+            if pw:
+                colored_log("success",
+                    f"Password found: [bold]{pw}[/bold]")
+            else:
+                colored_log("warning", "Password not found in wordlist.")
+            return
+
+        # ── 3. Interface setup (Linux only) ───────────────────────
         try:
             setup_interface(self)
-            
-            self.cleanup_manager.register(
-                self.interface,
-                self.monitor_interface,
-                self.interface_info
-            )
-            
-            self.cleanup_manager.pause_signal_handlers()
-            
-            try:
-                self.networks = scan_networks_continuous(self)
-            finally:
-                self.cleanup_manager.resume_signal_handlers()
+        except (KeyboardInterrupt, SystemExit):
+            return
 
+        self.cleanup.register(self.interface, self.monitor_interface,
+                              self.interface_info)
 
-            if not self.networks:
-                colored_log("error", "No networks found!")
-                _exit_program(self)
-                return
-
-            targets = select_target(self.networks)
-            if not targets:
-                _exit_program(self)
-                return
-
-            if len(targets) > 1:
-                console.print("\n=== Multiple Targets Mode ===", style="bold magenta")
-                console.print(
-                    f"Selected {len(targets)} targets for processing:",
-                    style="bright_cyan",
-                )
-                for target in targets:
-                    console.print(f"- {target.essid} ({target.bssid})", style="green")
-
-            successful_targets = []
-
-            for i, target in enumerate(targets, 1):
-                if len(targets) > 1:
-                    console.print(
-                        f"\n[Processing Target {i}/{len(targets)}]", style="bold yellow"
-                    )
-                    colored_log(
-                        "success", f"Selected target: {target.essid} ({target.bssid})"
-                    )
-
-                if target.essid == "<HIDDEN SSID>":
-                    revealed_ssid = decloak_ssid(self, target)
-                    if revealed_ssid:
-                        target.essid = revealed_ssid
-                        colored_log(
-                            "success", f"Target SSID updated to: {target.essid}"
-                        )
-                    else:
-                        colored_log(
-                            "error",
-                            "Failed to decloak SSID. Proceeding with capture anyway!",
-                        )
-
-                safe_essid = sanitize_ssid(target.essid)
-                cap_file = os.path.join(self.handshake_dir, f"{safe_essid}.cap")
-
-                if os.path.exists(cap_file):
-                    colored_log("info", f"Found existing handshake file: {cap_file}")
-                    console.print(
-                        "[?] Use existing handshake file and skip capture? (y/n)",
-                        style="yellow bold",
-                        end=": ",
-                    )
-                    use_existing = input().lower() == "y"
-
-                    if use_existing:
-                        successful_targets.append((cap_file, target))
-                        continue
-                    else:
-                        colored_log(
-                            "info",
-                            "User chose to capture new handshake even though one exists!",
-                        )
-                else:
-                    colored_log(
-                        "info", f"No existing handshake file found for {target.essid}!"
-                    )
-
-                handshake_path = capture_handshake(self, target)
-                if handshake_path:
-                    successful_targets.append((handshake_path, target))
-                else:
-                    colored_log(
-                        "warning",
-                        f"Failed to capture handshake for {target.essid}. Skipping to next target.",
-                    )
-
-            if successful_targets:
-                if len(targets) > 1:
-                    console.print(
-                        "\n=== Starting Password Cracking ===", style="bold magenta"
-                    )
-                
-                cracked_ssids = {}
-                
-                for i, (handshake_path, target) in enumerate(successful_targets, 1):
-                    if len(targets) > 1:
-                        console.print(
-                            f"\n[Cracking Target {i}/{len(successful_targets)}]",
-                            style="bold yellow",
-                        )
-                    
-                    if target.essid in cracked_ssids:
-                        previous_password = cracked_ssids[target.essid]
-                        colored_log("info", f"Checking if {target.essid} uses the same password as previous target...")
-                        
-                        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_wl:
-                            tmp_wl.write(f"{previous_password}\n")
-                            tmp_wl_path = tmp_wl.name
-                        
-                        try:
-                            verified_password = crack_password(handshake_path, tmp_wl_path, target, silent=True)
-                            
-                            if verified_password:
-                                colored_log("success", f"Confirmed! Same password works: [bold]{verified_password}[/bold]")
-                                console.print(f"  - Skipped full cracking (password verified)", style="dim")
-                                
-                                results_dir = "results"
-                                os.makedirs(results_dir, exist_ok=True)
-                                safe_essid = sanitize_ssid(target.essid)
-                                result_file = os.path.join(results_dir, f"{safe_essid}_result.txt")
-                                with open(result_file, "a") as f:
-                                    f.write(f"\n--- Duplicate SSID Target ---\n")
-                                    f.write(f"Network: {target.essid} ({target.bssid})\n")
-                                    f.write(f"Password: {verified_password}\n")
-                                    f.write(f"Channel: {target.channel}\n")
-                                    f.write(f"Encryption: {target.encryption}\n")
-                                    f.write(f"Power: {target.power} dBm\n")
-                                    f.write(f"Note: Result verified from previously cracked target in same session\n")
-                                colored_log("info", f"Results saved to {result_file}")
-                                continue
-                            else:
-                                colored_log("warning", "Different password detected! Proceeding with full cracking...")
-                        finally:
-                            if os.path.exists(tmp_wl_path):
-                                os.unlink(tmp_wl_path)
-
-                    colored_log("info", f"Cracking {target.essid} ({target.bssid})...")
-                    password = crack_password(handshake_path, self.wordlist_path, target)
-                    
-                    if password:
-                        cracked_ssids[target.essid] = password
-            else:
-                colored_log("warning", "No handshakes captured for cracking.")
-
-            _exit_program(self)
-            if not self.monitor_interface:
-                self.cleanup_manager.cleanup_done = True
-
-        except KeyboardInterrupt:
-            colored_log("warning", "Program interrupted by user!")
-        except Exception as e:
-            colored_log("error", f"Unexpected error: {e}")
+        # ── 4. Scan ───────────────────────────────────────────────
+        self.cleanup.pause()
+        try:
+            self.networks = scan_networks_continuous(self)
         finally:
-            if not self.cleanup_manager.cleanup_done and self.monitor_interface:
-                self.cleanup_manager._cleanup()
+            self.cleanup.resume()
+
+        if not self.networks:
+            colored_log("error", "No networks found!")
+            return
+
+        # ── 5. Target selection ───────────────────────────────────
+        targets = select_target(self.networks)
+        if not targets:
+            return
+
+        if len(targets) > 1:
+            console.print("\n=== Multiple Targets Mode ===", style="bold magenta")
+            for t in targets:
+                console.print(f"  - {t.essid} ({t.bssid})", style="green")
+
+        successful: list[tuple[str, object]] = []   # (cap_path, network)
+
+        for i, target in enumerate(targets, 1):
+            if len(targets) > 1:
+                console.print(f"\n[Processing Target {i}/{len(targets)}]",
+                              style="bold yellow")
+            colored_log("success", f"Selected: {target.essid} ({target.bssid})")
+
+            # ── Decloak hidden SSID ───────────────────────────────
+            if target.essid == "<HIDDEN SSID>":
+                revealed = decloak_ssid(self, target)
+                if revealed:
+                    target.essid = revealed
+                    colored_log("success", f"SSID decloaked: {target.essid}")
+                else:
+                    colored_log("warning", "Could not decloak SSID. Proceeding anyway.")
+
+            # ── Check for existing handshake ──────────────────────
+            safe = sanitize_ssid(target.essid)
+            existing_cap = os.path.join(HANDSHAKES_DIR, f"{safe}.cap")
+            if os.path.exists(existing_cap):
+                console.print("[?] Use existing handshake? (y/n): ",
+                              style="yellow bold", end="")
+                if input().strip().lower() == "y":
+                    successful.append((existing_cap, target))
+                    continue
+                colored_log("info", "Capturing new handshake...")
+
+            handshake = capture_handshake(self, target)
+            if handshake:
+                successful.append((handshake, target))
+            else:
+                colored_log("warning",
+                            f"Skipping {target.essid} — capture failed.")
+
+        # ── 6. Cracking ───────────────────────────────────────────
+        if not successful:
+            colored_log("warning", "No handshakes captured.")
+            return
+
+        if len(targets) > 1:
+            console.print("\n=== Starting Password Cracking ===", style="bold magenta")
+
+        cracked_ssids: dict[str, str] = {}
+
+        for i, (cap_path, target) in enumerate(successful, 1):
+            if len(successful) > 1:
+                console.print(f"\n[Cracking {i}/{len(successful)}]",
+                              style="bold yellow")
+
+            # If the same SSID was already cracked, just verify
+            if target.essid in cracked_ssids:
+                prev_pw = cracked_ssids[target.essid]
+                tmp = tempfile.NamedTemporaryFile(mode="w", delete=False)
+                tmp.write(f"{prev_pw}\n")
+                tmp.close()
+                try:
+                    pw = crack_password(cap_path, tmp.name, target,
+                                        use_hashcat=self.use_hashcat,
+                                        has_discrete_gpu=self.hashcat_discrete_gpu,
+                                        silent=True)
+                    if pw:
+                        colored_log("success",
+                                    f"Same password verified: [bold]{pw}[/bold]")
+                        continue
+                    colored_log("warning", "Different password; full crack needed.")
+                finally:
+                    os.unlink(tmp.name)
+
+            pw = crack_password(cap_path, self.wordlist_path, target,
+                                use_hashcat=self.use_hashcat,
+                                has_discrete_gpu=self.hashcat_discrete_gpu)
+            if pw:
+                cracked_ssids[target.essid] = pw
+
+
+# ── Entry point ─────────────────────────────────────────────────────────
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser."""
+    parser = argparse.ArgumentParser(
+        description="WiFi Handshake Capture & Cracking Tool"
+    )
+    parser.add_argument(
+        "--wordlist", "-w",
+        help="Path to custom wordlist file",
+    )
+    parser.add_argument(
+        "--hashcat", action="store_true", default=False,
+        help="Force hashcat (GPU) cracking",
+    )
+    parser.add_argument(
+        "--no-hashcat", action="store_true", default=False,
+        dest="no_hashcat",
+        help="Force aircrack-ng (CPU) even if hashcat is available",
+    )
+    parser.add_argument(
+        "--offline", "-o",
+        type=str, default=None,
+        metavar="CAP_FILE",
+        help="Path to an existing .cap file for offline cracking "
+             "(skip scan/capture, go straight to cracking). Useful on Windows.",
+    )
+    return parser
+
+
+def main():
+    # Parse args FIRST so --help works even without dependencies
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+
+    # Root check (Linux only — aircrack-ng needs root)
+    if IS_LINUX and os.geteuid() != 0:
+        colored_log("error", "Root access required. Run with: sudo python main.py")
+        sys.exit(1)
+
+    # ── Dependency check (platform-aware) ────────────────────────
+    if IS_WINDOWS:
+        # Windows: only aircrack-ng.exe for CPU cracking; capture tools unavailable
+        required_win = ["aircrack-ng"]
+        missing_win = [d for d in required_win if not check_dependency(d)]
+        if missing_win:
+            colored_log("warning",
+                "aircrack-ng not found. CPU cracking unavailable, "
+                "but hashcat GPU can still be used if a GPU is detected.")
+            colored_log("info",
+                "Download aircrack-ng: https://www.aircrack-ng.org/downloads.html")
+        else:
+            colored_log("success", "aircrack-ng detected (CPU cracking available).")
+
+        colored_log("info",
+            "Windows mode: handshake capture requires Linux (monitor mode unsupported). "
+            "Use --offline to crack an existing .cap file.")
+    else:
+        # Linux: semua tool capture + cracking wajib ada
+        required = ["airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng"]
+        missing = [d for d in required if not check_dependency(d)]
+        if missing:
+            colored_log("error", f"Missing dependencies: {', '.join(missing)}")
+            colored_log("warning", "Install aircrack-ng suite first.")
+            sys.exit(1)
+
+    try:
+        app = Wifyte(args)
+        app.run()
+    except KeyboardInterrupt:
+        colored_log("warning", "Interrupted by user.")
+    except Exception as e:
+        log_error("Fatal error", e)
+        raise
 
 
 if __name__ == "__main__":
-    if os.geteuid() != 0:
-        colored_log(
-            "error", "This program requires root access. Please run with 'sudo'"
-        )
-        sys.exit(1)
-
-    dependencies = ["airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng"]
-
-    missing = [dep for dep in dependencies if not check_dependency(dep)]
-
-    if missing:
-        colored_log("error", f"Missing dependencies: {', '.join(missing)}")
-        colored_log(
-            "warning",
-            "Please install aircrack-ng suite: sudo apt-get install aircrack-ng!",
-        )
-        sys.exit(1)
-
-    try:
-        wifyte = Wifyte()
-        wifyte.run()
-    except Exception as e:
-        colored_log("error", f"Unexpected error: {e}")
+    main()
