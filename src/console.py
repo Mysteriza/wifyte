@@ -2,7 +2,7 @@
 Rich console wrapper with rotating file-logging for debugging.
 
 Terminal output uses coloured prefixes; debug logs go to
-``logs/debug_log_*.txt`` (last 5 logs kept).
+``logs/debug_log_*.txt`` (last 3 logs kept, oldest auto-removed).
 """
 
 import os
@@ -32,9 +32,9 @@ def _get_logger() -> logging.Logger:
 
     os.makedirs(LOGS_DIR, exist_ok=True)
 
-    # Keep last 5 debug logs
+    # Keep last 3 debug logs
     existing = sorted(glob.glob(os.path.join(LOGS_DIR, "debug_log_*.txt")))
-    while len(existing) >= 5:
+    while len(existing) >= 3:
         try:
             os.remove(existing.pop(0))
         except OSError:
@@ -60,7 +60,8 @@ def _get_logger() -> logging.Logger:
 
 def colored_log(level: str, message: str):
     """
-    Print a colour-coded log line to the terminal with a prefix.
+    Print a colour-coded log line to the terminal with a prefix,
+    and persist to the debug log file.
 
     Levels: info [*], success [+], warning [!], error [-].
     """
@@ -79,6 +80,16 @@ def colored_log(level: str, message: str):
     style = style_map.get(level, "white")
     prefix = prefix_map.get(level, "[*]")
     console.print(f"{prefix} {message}", style=style)
+
+    # Also persist to file log
+    logger = _get_logger()
+    log_level_map = {
+        "info":    logging.INFO,
+        "success": logging.INFO,
+        "warning": logging.WARNING,
+        "error":   logging.ERROR,
+    }
+    logger.log(log_level_map.get(level, logging.INFO), message)
 
 
 def log_debug(message: str, data=None):

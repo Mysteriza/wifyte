@@ -15,22 +15,39 @@ from src.console import colored_log, log_debug
 
 _DISCRETE_KEYWORDS = [
     "rtx", "gtx", "quadro", "tesla", "nvidia",
-    "rx ", "rx ", "firepro", "pro wx", "radeon",
+    "rx ", "firepro", "pro wx",
     "arc ", "iris xe",
 ]
 
+_INTEGRATED_KEYWORDS = [
+    "intel", "uhd graphics", "hd graphics", "iris plus",
+    "radeon(tm) graphics", "radeon graphics", "vega",
+    "amd radeon", "integrated",
+]
+
 _SKIP_KEYWORDS = [
-    "intel", "microsoft", "basic display", "vmware",
+    "microsoft", "basic display", "vmware",
     "virtualbox", "parsec", "remote", "indirect",
 ]
 
 
 def _is_discrete(name: str) -> bool:
-    """Heuristic: discrete GPU keywords beat skip keywords."""
+    """Heuristic: classify GPU as discrete or integrated.
+
+    Virtual/software GPUs → returns False (skipped).
+    Discrete GPU keywords → returns True.
+    Integrated GPU keywords → returns False.
+    Unknown → returns False (assume integrated).
+    """
     lower = name.lower()
+    # Skip virtual / software GPU entirely
     if any(kw in lower for kw in _SKIP_KEYWORDS):
         return False
-    return any(kw in lower for kw in _DISCRETE_KEYWORDS)
+    # Check discrete first (some AMD names overlap — discrete wins)
+    if any(kw in lower for kw in _DISCRETE_KEYWORDS):
+        return True
+    # Integrated or unknown
+    return False
 
 
 def _detect_windows() -> tuple[Optional[str], bool]:
@@ -74,10 +91,21 @@ def _detect_windows() -> tuple[Optional[str], bool]:
         except Exception:
             gpu_lines = []
 
+    # Collect all real GPUs (skip only virtual/software adapters)
+    real_gpus = []
     for line in gpu_lines:
         name = line.strip()
-        if not name or any(kw in name.lower() for kw in _SKIP_KEYWORDS):
+        if not name:
             continue
+        lower = name.lower()
+        # Skip only virtual/remote/software GPUs (Microsoft Basic Display, VMware, etc.)
+        if any(kw in lower for kw in ["microsoft", "basic display", "vmware",
+                                       "virtualbox", "parsec", "remote", "indirect"]):
+            continue
+        real_gpus.append(name)
+
+    # Return the first real GPU found (prefer discrete over integrated)
+    for name in real_gpus:
         log_debug(f"Windows GPU found: {name}")
         return name, _is_discrete(name)
 

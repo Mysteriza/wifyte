@@ -18,8 +18,8 @@ from typing import Optional
 
 from src.console import console, colored_log, log_error, log_debug
 from src.config import (
-    HASHCAT_VERSION, HASHCAT_URL, HASHCAT_SHA256, BIN_DIR, DEPS_DIR,
-    HCOV_DIR, IS_LINUX, IS_WINDOWS,
+    HASHCAT_VERSION, HASHCAT_URL_7Z, HASHCAT_7Z_SHA256, HASHCAT_URL_TARGZ,
+    BIN_DIR, DEPS_DIR, HCOV_DIR, IS_LINUX, IS_WINDOWS,
 )
 from src.utils import download_with_progress, execute_command
 
@@ -133,29 +133,55 @@ def ensure_hashcat() -> bool:
             colored_log("success", f"Hashcat found locally: {_hashcat_path}")
             return True
 
-    # 4. Download
+    # 4. Download (try .7z first, fall back to .tar.gz)
     colored_log("info", "Hashcat not found. Downloading...")
     os.makedirs(DEPS_DIR, exist_ok=True)
-    archive = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.7z")
-
-    if not download_with_progress(HASHCAT_URL, archive, "Hashcat", HASHCAT_SHA256):
-        return False
-
-    # Extract to bin/
     extract_dir = os.path.join(BIN_DIR, "hashcat")
-    if not _extract_archive(archive, extract_dir):
+
+    # Try .7z with 7-Zip first
+    archive_7z = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.7z")
+    if download_with_progress(HASHCAT_URL_7Z, archive_7z, "Hashcat", HASHCAT_7Z_SHA256):
+        if _extract_archive(archive_7z, extract_dir):
+            if _locate_hashcat(extract_dir):
+                return True
+        colored_log("info", "7z extraction failed, trying tar.gz fallback...")
+    else:
+        colored_log("info", "7z download failed, trying tar.gz fallback...")
+
+    # Fallback: .tar.gz (extractable with Python's built-in tarfile)
+    archive_tgz = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.tar.gz")
+    if not download_with_progress(HASHCAT_URL_TARGZ, archive_tgz, "Hashcat (tar.gz)"):
+        log_error("Failed to download hashcat (both 7z and tar.gz).")
         return False
 
-    # Locate binary
-    for root, dirs, files in os.walk(extract_dir):
+    # Extract tar.gz with Python's tarfile
+    import tarfile
+    try:
+        os.makedirs(extract_dir, exist_ok=True)
+        with tarfile.open(archive_tgz, "r:gz") as tar:
+            tar.extractall(path=extract_dir)
+        colored_log("success", "Extracted hashcat tar.gz.")
+    except Exception as e:
+        log_error("Failed to extract hashcat tar.gz", e)
+        return False
+
+    if _locate_hashcat(extract_dir):
+        return True
+
+    log_error("Hashcat binary not found after extraction.")
+    return False
+
+
+def _locate_hashcat(search_dir: str) -> bool:
+    """Walk *search_dir* looking for the hashcat binary."""
+    global _hashcat_path
+    for root, dirs, files in os.walk(search_dir):
         for f in files:
             if f in ("hashcat", "hashcat.exe"):
                 _hashcat_path = os.path.join(root, f)
                 _add_path(os.path.dirname(_hashcat_path))
                 colored_log("success", f"Hashcat installed: {_hashcat_path}")
                 return True
-
-    log_error("Hashcat binary not found after extraction.")
     return False
 
 

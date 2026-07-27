@@ -160,26 +160,26 @@ class Wifyte:
 
         # ── 2. Offline / Live mode ────────────────────────────────
         if self.offline_cap or IS_WINDOWS:
-            # Mode offline / Windows: skip capture, langsung crack
+            # Offline / Windows mode: skip capture, crack directly
             cap_path = self.offline_cap
             if not cap_path:
-                # Cari file .cap di handshakes/ jika ada
+                # Look for existing .cap files in handshakes/
                 handshakes_dir = HANDSHAKES_DIR
                 import glob as _glob
                 caps = _glob.glob(os.path.join(handshakes_dir, "*.cap"))
                 if caps:
                     cap_path = caps[0]
-                    colored_log("info", f"Menggunakan handshake existing: {cap_path}")
+                    colored_log("info", f"Using existing handshake: {cap_path}")
                 else:
                     colored_log("error",
-                        "Tidak ada file .cap. Gunakan --offline PATH_TO_CAP "
-                        "untuk cracking file capture yang sudah ada.")
+                        "No .cap file found. Use --offline PATH_TO_CAP "
+                        "to crack an existing capture file.")
                     colored_log("info",
-                        "Atau jalankan di Linux dengan adapter WiFi untuk "
-                        "melakukan scan & capture langsung.")
+                        "Or run on Linux with a WiFi adapter to "
+                        "scan & capture directly.")
                     return
 
-            # Ekstrak ESSID dari filename atau pakai basename
+            # Extract ESSID from filename or use basename
             essid = os.path.splitext(os.path.basename(cap_path))[0]
             from src.scanner import WiFiNetwork
             mock_target = WiFiNetwork(
@@ -193,9 +193,9 @@ class Wifyte:
                                 has_discrete_gpu=self.hashcat_discrete_gpu)
             if pw:
                 colored_log("success",
-                    f"Password ditemukan: [bold]{pw}[/bold]")
+                    f"Password found: [bold]{pw}[/bold]")
             else:
-                colored_log("warning", "Password tidak ditemukan di wordlist.")
+                colored_log("warning", "Password not found in wordlist.")
             return
 
         # ── 3. Interface setup (Linux only) ───────────────────────
@@ -328,8 +328,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--offline", "-o",
         type=str, default=None,
         metavar="CAP_FILE",
-        help="Path to existing .cap file untuk cracking offline "
-             "(skip scan/capture, langsung crack). Berguna di Windows.",
+        help="Path to an existing .cap file for offline cracking "
+             "(skip scan/capture, go straight to cracking). Useful on Windows.",
     )
     return parser
 
@@ -346,21 +346,21 @@ def main():
 
     # ── Dependency check (platform-aware) ────────────────────────
     if IS_WINDOWS:
-        # Windows: hanya aircrack-ng.exe untuk CPU cracking, capture tools tidak ada
+        # Windows: only aircrack-ng.exe for CPU cracking; capture tools unavailable
         required_win = ["aircrack-ng"]
         missing_win = [d for d in required_win if not check_dependency(d)]
         if missing_win:
             colored_log("warning",
-                "aircrack-ng tidak ditemukan. Cracking via CPU tidak tersedia, "
-                "tapi hashcat GPU tetap bisa dipakai jika GPU terdeteksi.")
+                "aircrack-ng not found. CPU cracking unavailable, "
+                "but hashcat GPU can still be used if a GPU is detected.")
             colored_log("info",
                 "Download aircrack-ng: https://www.aircrack-ng.org/downloads.html")
         else:
             colored_log("success", "aircrack-ng detected (CPU cracking available).")
 
         colored_log("info",
-            "Windows mode: capture handshake tidak bisa (monitor mode tidak support). "
-            "Gunakan --offline untuk crack file .cap yang sudah ada.")
+            "Windows mode: handshake capture requires Linux (monitor mode unsupported). "
+            "Use --offline to crack an existing .cap file.")
     else:
         # Linux: semua tool capture + cracking wajib ada
         required = ["airmon-ng", "airodump-ng", "aireplay-ng", "aircrack-ng"]

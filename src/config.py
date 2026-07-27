@@ -36,7 +36,7 @@ WORDLIST_URL           = (
 
 AIRCRACK_DEPS = ["aircrack-ng", "airodump-ng", "aireplay-ng", "airmon-ng"]
 
-# Windows aircrack bundle (official — hanya aircrack-ng.exe untuk CPU cracking)
+# Windows aircrack bundle (official — aircrack-ng.exe for CPU cracking only)
 AIRCRACK_WIN_URL = (
     "https://download.aircrack-ng.org/aircrack-ng-1.7-win.zip"
 )
@@ -45,11 +45,15 @@ AIRCRACK_WIN_SHA256 = ""
 
 # ── Hashcat ────────────────────────────────────────────────────────────
 
-HASHCAT_VERSION  = "7.1.2"
-HASHCAT_URL_BASE = "https://github.com/hashcat/hashcat/releases/download/"
-HASHCAT_URL      = f"{HASHCAT_URL_BASE}v{HASHCAT_VERSION}/hashcat-{HASHCAT_VERSION}.7z"
-HASHCAT_SHA256   = (
+HASHCAT_VERSION   = "7.1.2"
+HASHCAT_URL_BASE  = "https://github.com/hashcat/hashcat/releases/download/"
+HASHCAT_URL_7Z    = f"{HASHCAT_URL_BASE}v{HASHCAT_VERSION}/hashcat-{HASHCAT_VERSION}.7z"
+HASHCAT_7Z_SHA256 = (
     "80db0316387794ce9d14ed376da75b8a7742972485b45db790f5f8260307ff98"
+)
+# tar.gz fallback (extractable with Python's built-in tarfile)
+HASHCAT_URL_TARGZ = (
+    f"https://hashcat.net/files/hashcat-{HASHCAT_VERSION}.tar.gz"
 )
 
 # ── Capture / scanning defaults ────────────────────────────────────────
