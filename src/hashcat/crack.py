@@ -133,6 +133,16 @@ def crack_with_hashcat(
     hc_dir = os.path.dirname(hashcat_bin)
     potfile = os.path.join(hc_dir, "hashcat.potfile")
 
+    # ── Fresh potfile every run ──────────────────────────────────
+    # Wipe any leftover potfile so we can detect new entries
+    # reliably (otherwise hashcat skips already-cracked hashes
+    # and our before/after diff sees no change).
+    try:
+        if os.path.exists(potfile):
+            os.remove(potfile)
+    except OSError:
+        pass
+
     # Add --potfile-path so we know exactly where to look
     cmd.extend(["--potfile-path", potfile])
 
@@ -153,7 +163,7 @@ def crack_with_hashcat(
     except Exception:
         pass
 
-    # Read potfile before cracking
+    # Read potfile before cracking (should be empty/absent now)
     potfile_before = _read_potfile_raw(potfile)
 
     start_time = time.time()
