@@ -163,17 +163,19 @@ class Wifyte:
             # Offline / Windows mode: skip capture, crack directly
             cap_path = self.offline_cap
             if not cap_path:
-                # Look for existing .cap files in handshakes/
+                # Look for existing handshake files in handshakes/
                 handshakes_dir = HANDSHAKES_DIR
                 import glob as _glob
                 caps = _glob.glob(os.path.join(handshakes_dir, "*.cap"))
+                caps += _glob.glob(os.path.join(handshakes_dir, "*.pcap"))
+                caps += _glob.glob(os.path.join(handshakes_dir, "*.pcapng"))
                 if caps:
                     cap_path = caps[0]
                     colored_log("info", f"Using existing handshake: {cap_path}")
                 else:
                     colored_log("error",
-                        "No .cap file found. Use --offline PATH_TO_CAP "
-                        "to crack an existing capture file.")
+                        "No handshake file found (.cap / .pcap / .pcapng). "
+                        "Use --offline PATH_TO_CAP to crack an existing capture.")
                     colored_log("info",
                         "Or run on Linux with a WiFi adapter to "
                         "scan & capture directly.")
