@@ -11,6 +11,7 @@ import os
 from typing import Optional
 
 from src.console import colored_log, log_error, log_debug
+from src.validator import _classify_eapol
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -31,39 +32,6 @@ def _format_mac(raw) -> str:
     if isinstance(raw, bytes) and len(raw) == 6:
         return ":".join(f"{x:02x}" for x in raw)
     return "00:00:00:00:00:00"
-
-
-def _classify_eapol(packet) -> str | None:
-    """
-    Classify an EAPOL frame as M1/M2/M3/M4 based on key-info flags.
-
-    Uses Scapy's high-level ``EAPOL_KEY`` fields matching the reference
-    implementation from handshakeCracker.
-    """
-    try:
-        from scapy.layers.eap import EAPOL_KEY
-    except ImportError:
-        return None
-
-    if not packet.haslayer(EAPOL_KEY):
-        return None
-    ek = packet[EAPOL_KEY]
-
-    ack = bool(ek.key_ack)
-    mic = bool(ek.has_key_mic)
-    ins = bool(ek.install)
-    sec = bool(ek.secure)
-
-    if ack and not mic and not ins and not sec:
-        return "M1"
-    if not ack and mic and not ins and not sec:
-        return "M2"
-    if ack and mic and ins and sec:
-        return "M3"
-    if not ack and mic and not ins and sec:
-        return "M4"
-    return None
-
 
 def _extract_raw_eapol(pkt) -> bytes | None:
     """Extract the raw EAPOL frame bytes from a packet."""

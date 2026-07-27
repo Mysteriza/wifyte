@@ -1,9 +1,11 @@
 """
-Hashcat binary discovery — check PATH, download & extract tar.gz, warm up GPU kernel.
+Hashcat binary discovery — check PATH, download & extract the pre-compiled
+binary release, warm up GPU kernel.
 
-Downloads ``.tar.gz`` from hashcat.net (extractable with Python's built-in
-``tarfile`` — no external archiver needed). Falls back to ``.7z`` from
-GitHub if the tar.gz is unavailable (still requires 7-Zip for that path).
+Downloads ``hashcat-{VERSION}.7z`` from GitHub releases (the binary
+release, NOT the source tarball).  On Windows we auto-download the
+standalone ``7zr.exe`` (~300 KB) from 7-zip.org so no external archiver
+is needed.
 
 The warm-up step is critical: the first hashcat run after a driver update
 or new GPU install takes 30-60 seconds compiling OpenCL kernels. We cache
@@ -22,7 +24,7 @@ from typing import Optional
 
 from src.console import console, colored_log, log_error, log_debug
 from src.config import (
-    HASHCAT_VERSION, HASHCAT_URL_7Z, HASHCAT_7Z_SHA256, HASHCAT_URL_TARGZ,
+    HASHCAT_VERSION, HASHCAT_URL_7Z, HASHCAT_7Z_SHA256,
     BIN_DIR, DEPS_DIR, HCOV_DIR, IS_LINUX, IS_WINDOWS,
 )
 from src.utils import download_with_progress, execute_command
@@ -31,6 +33,7 @@ from src.utils import download_with_progress, execute_command
 # ── State ───────────────────────────────────────────────────────────────
 
 _hashcat_path: str | None = None
+_SEVEN_ZIP_EXE: str | None = None          # path to 7z(r) for extraction
 
 
 # ── Discovery ──────────────────────────────────────────────────────────
@@ -42,42 +45,58 @@ def get_hashcat_path() -> str | None:
 
 def is_hashcat_available() -> bool:
     """Check whether hashcat is currently available (cached or on PATH)."""
-    if _hashcat_path and os.path.exists(_hashcat_path):
+    if _hashcat_path and os.path.isfile(_hashcat_path):
         return True
     found = shutil.which("hashcat")
     return found is not None
 
 
-# ── 7z extraction ──────────────────────────────────────────────────────
+# ── 7z extraction (standalone 7zr.exe on Windows) ──────────────────────
 
-def _find_7z() -> str | None:
-    """Locate a 7-Zip executable on the system."""
-    for exe in ["7z", "7zr", "7za"]:
-        found = shutil.which(exe)
-        if found:
-            return found
-    # Windows common paths
-    paths = [
-        r"C:\Program Files\7-Zip\7z.exe",
-        r"C:\Program Files (x86)\7-Zip\7z.exe",
-    ]
-    for p in paths:
-        if os.path.exists(p):
-            return p
-    return None
+_7ZR_URL = "https://www.7-zip.org/a/7zr.exe"
+
+
+def _ensure_7zr() -> bool:
+    """Ensure a 7‑Zip executable is available, downloading 7zr.exe if needed."""
+    global _SEVEN_ZIP_EXE
+
+    # Already located
+    if _SEVEN_ZIP_EXE and os.path.isfile(_SEVEN_ZIP_EXE):
+        return True
+
+    # On Linux/macOS try the system 7z
+    if not IS_WINDOWS:
+        for exe in ("7z", "7zr", "7za"):
+            p = shutil.which(exe)
+            if p:
+                _SEVEN_ZIP_EXE = p
+                return True
+        log_error("7z not found. Install it: sudo apt-get install p7zip-full")
+        return False
+
+    # Windows – download standalone 7zr.exe next to hashcat
+    sz = os.path.join(BIN_DIR, "7zr.exe")
+    if os.path.isfile(sz):
+        _SEVEN_ZIP_EXE = sz
+        return True
+
+    colored_log("info", "Downloading standalone 7zr.exe for extraction...")
+    if not download_with_progress(_7ZR_URL, sz, "7zr"):
+        log_error("Failed to download 7zr.exe from 7-zip.org.")
+        return False
+    _SEVEN_ZIP_EXE = sz
+    return True
 
 
 def _extract_archive(archive: str, dest: str) -> bool:
-    """Extract a .7z archive using 7-Zip."""
-    sevenz = _find_7z()
-    if not sevenz:
-        log_error("7-Zip not found. Install 7-Zip or extract manually.")
+    """Extract a .7z archive using the 7‑Zip executable."""
+    if not _ensure_7zr():
         return False
 
     colored_log("info", f"Extracting {os.path.basename(archive)}...")
     try:
         subprocess.run(
-            [sevenz, "x", archive, f"-o{dest}", "-y"],
+            [_SEVEN_ZIP_EXE, "x", archive, f"-o{dest}", "-y"],
             capture_output=True, text=True, check=True, timeout=120,
         )
         colored_log("success", "Extraction complete.")
@@ -87,6 +106,9 @@ def _extract_archive(archive: str, dest: str) -> bool:
         return False
     except subprocess.CalledProcessError as e:
         log_error(f"Extraction failed: {e.stderr or e.stdout}")
+        return False
+    except Exception as e:
+        log_error("Extraction error", e)
         return False
 
 
@@ -98,85 +120,77 @@ def _add_path(dirpath: str):
         os.environ["PATH"] = dirpath + os.pathsep + os.environ.get("PATH", "")
 
 
+def _expected_binary_path() -> str:
+    """
+    Return the expected path for the hashcat binary *after* the official
+    ``.7z`` is extracted under ``BIN_DIR``.
+    """
+    exe_name = "hashcat.exe" if IS_WINDOWS else "hashcat"
+    return os.path.join(BIN_DIR, f"hashcat-{HASHCAT_VERSION}", exe_name)
+
+
 def ensure_hashcat() -> bool:
     """
-    Ensure hashcat is available.
+    Ensure hashcat is available by checking (in order):
 
-    Checks (in order):
       1. Already cached path.
       2. System PATH.
-      3. Local ``bin/`` directory.
-      4. Download + extract to ``deps/``.
+      3. Local ``bin/hashcat-{VERSION}/hashcat.exe``.
+      4. Download ``hashcat-{VERSION}.7z`` from GitHub releases + extract.
 
     Returns True if available.
     """
     global _hashcat_path
 
     # 1. Already cached
-    if _hashcat_path and os.path.exists(_hashcat_path):
+    if _hashcat_path and os.path.isfile(_hashcat_path):
         return True
 
     # 2. PATH
-    path_on_path = shutil.which("hashcat")
-    if path_on_path:
-        _hashcat_path = path_on_path
+    found_on_path = shutil.which("hashcat")
+    if found_on_path:
+        _hashcat_path = found_on_path
         colored_log("success", f"Hashcat found on PATH: {_hashcat_path}")
         return True
 
-    # 3. Local bin/
-    local_candidates = [
-        os.path.join(BIN_DIR, "hashcat"),
-        os.path.join(BIN_DIR, "hashcat.exe"),
-        os.path.join(BIN_DIR, "hashcat", "hashcat.exe"),
-        os.path.join(BIN_DIR, "hashcat", "hashcat"),
-    ]
-    for cand in local_candidates:
-        if os.path.exists(cand):
-            _hashcat_path = cand
-            _add_path(os.path.dirname(cand))
-            colored_log("success", f"Hashcat found locally: {_hashcat_path}")
-            return True
-
-    # 4. Download tar.gz (extractable with Python's built-in tarfile — no 7-Zip needed)
-    colored_log("info", "Hashcat not found. Downloading...")
-    os.makedirs(DEPS_DIR, exist_ok=True)
-    extract_dir = os.path.join(BIN_DIR, "hashcat")
-
-    archive_tgz = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.tar.gz")
-    if not download_with_progress(HASHCAT_URL_TARGZ, archive_tgz, "Hashcat"):
-        # Fallback: try 7z from GitHub in case tar.gz is unavailable
-        colored_log("info", "tar.gz download failed, trying 7z fallback (requires 7-Zip)...")
-        archive_7z = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.7z")
-        if not download_with_progress(HASHCAT_URL_7Z, archive_7z, "Hashcat", HASHCAT_7Z_SHA256):
-            log_error("Failed to download hashcat.")
-            return False
-        if not _extract_archive(archive_7z, extract_dir):
-            return False
-        if _locate_hashcat(extract_dir):
-            return True
-        log_error("Hashcat binary not found after 7z extraction.")
-        return False
-
-    # Extract tar.gz with Python's built-in tarfile
-    import tarfile
-    try:
-        os.makedirs(extract_dir, exist_ok=True)
-        with tarfile.open(archive_tgz, "r:gz") as tar:
-            tar.extractall(path=extract_dir)
-        colored_log("success", "Extracted hashcat tar.gz.")
-    except Exception as e:
-        log_error("Failed to extract hashcat tar.gz", e)
-        return False
-
-    if _locate_hashcat(extract_dir):
+    # 3. Local bin/hashcat-{VERSION}/hashcat.exe
+    expected = _expected_binary_path()
+    if os.path.isfile(expected):
+        _hashcat_path = expected
+        _add_path(os.path.dirname(expected))
+        colored_log("success", f"Hashcat found locally: {_hashcat_path}")
         return True
 
-    log_error("Hashcat binary not found after tar.gz extraction.")
+    # 4. Download & extract the binary .7z from GitHub
+    colored_log("info", "Hashcat not found. Downloading binary release...")
+    os.makedirs(DEPS_DIR, exist_ok=True)
+    os.makedirs(BIN_DIR, exist_ok=True)
+
+    archive_7z = os.path.join(DEPS_DIR, f"hashcat-{HASHCAT_VERSION}.7z")
+    if not download_with_progress(HASHCAT_URL_7Z, archive_7z, "Hashcat", HASHCAT_7Z_SHA256):
+        log_error("Failed to download hashcat from GitHub.")
+        return False
+
+    if not _extract_archive(archive_7z, BIN_DIR):
+        return False
+
+    # After extraction, verify the binary exists
+    if os.path.isfile(expected):
+        _hashcat_path = expected
+        _add_path(os.path.dirname(expected))
+        colored_log("success", f"Hashcat installed: {_hashcat_path}")
+        return True
+
+    # Fallback: scan the extraction directory for any hashcat binary
+    if _locate_hashcat(BIN_DIR):
+        return True
+
+    log_error("Hashcat binary not found after extraction.")
     return False
 
 
 def _locate_hashcat(search_dir: str) -> bool:
-    """Walk *search_dir* looking for the hashcat binary."""
+    """Walk *search_dir* looking for the hashcat binary (fallback)."""
     global _hashcat_path
     for root, dirs, files in os.walk(search_dir):
         for f in files:
@@ -236,6 +250,8 @@ def warmup_hashcat_kernel(hc22000_path: str | None = None) -> bool:
             log_debug("No hc22000 available for kernel warm-up.")
             return False
 
+    hc_dir = os.path.dirname(_hashcat_path)
+
     cmd = [
         _hashcat_path,
         "-m", "22000",
@@ -246,31 +262,31 @@ def warmup_hashcat_kernel(hc22000_path: str | None = None) -> bool:
         dummy_wl,
     ]
 
-    colored_log("info", "Warming up hashcat GPU kernel (30-60s)...")
-    spinner_stop = threading.Event()
-    spinner = threading.Thread(
-        target=lambda: _warmup_spinner(spinner_stop), daemon=True
-    )
-    spinner.start()
+    colored_log("info", "Compiling GPU kernels for hashcat (30-60s)...")
 
+    from rich.console import Console as _Console
+    status = console.status("Compiling GPU kernels...", spinner="dots")
+    status.start()
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300,
+            cwd=hc_dir,
         )
         success = proc.returncode == 0
     except subprocess.TimeoutExpired:
         log_debug("Kernel warm-up timed out — continuing anyway.")
         success = False
     except PermissionError:
-        colored_log("warning", "Hashcat blocked by system (antivirus?). Warm-up skipped.")
+        colored_log("warning",
+                    "Hashcat execution blocked by system. "
+                    "Add an exception for the 'bin/' folder or disable Real-time protection.")
         log_debug("PermissionError during warm-up — continuing anyway.")
         success = False
     except Exception as e:
         log_debug(f"Kernel warm-up failed: {e} — continuing anyway.")
         success = False
     finally:
-        spinner_stop.set()
-        spinner.join(timeout=1)
+        status.stop()
 
     # Cleanup dummy
     for f in [dummy_wl]:
@@ -282,17 +298,3 @@ def warmup_hashcat_kernel(hc22000_path: str | None = None) -> bool:
     if success:
         colored_log("success", "Hashcat kernel cache warmed up.")
     return success
-
-
-def _warmup_spinner(stop: threading.Event):
-    """Spinner for warm-up progress."""
-    chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    i = 0
-    while not stop.is_set():
-        console.print(f"  Compiling GPU kernels {chars[i % len(chars)]}",
-                      style="yellow", end="\r")
-        sys.stdout.flush()
-        i += 1
-        time.sleep(0.2)
-    console.print(" " * 50, end="\r")
-    sys.stdout.flush()

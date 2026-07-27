@@ -131,7 +131,10 @@ def crack_with_hashcat(
                 hc22000_path, wordlist_path])
 
     hc_dir = os.path.dirname(hashcat_bin)
-    potfile = os.path.join(os.path.expanduser("~"), ".hashcat", "hashcat.potfile")
+    potfile = os.path.join(hc_dir, "hashcat.potfile")
+
+    # Add --potfile-path so we know exactly where to look
+    cmd.extend(["--potfile-path", potfile])
 
     # Warm up GPU kernel (compilation may take 30-90 seconds first run)
     colored_log("info", f"Warming up GPU kernel for {display_essid}...")
@@ -162,6 +165,7 @@ def crack_with_hashcat(
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
             cwd=hc_dir,
+            stdin=subprocess.DEVNULL,
         )
         if proc.stdout is None:
             raise RuntimeError("stdout pipe not created")
@@ -193,7 +197,7 @@ def crack_with_hashcat(
                     except Exception:
                         pass
                     status.update(
-                        description=f"Cracking [bold]{display_essid}[/] with hashcat..."
+                        status=f"Cracking [bold]{display_essid}[/] with hashcat..."
                     )
 
                 # Rotate message every 8 seconds
@@ -203,7 +207,7 @@ def crack_with_hashcat(
                     last_msg_switch = now
                     if kernel_init_done:
                         status.update(
-                            description=f"{_HASHCAT_MESSAGES[msg_idx]} [bold]{display_essid}[/]"
+                            status=f"{_HASHCAT_MESSAGES[msg_idx]} [bold]{display_essid}[/]"
                         )
         finally:
             status.stop()
@@ -239,9 +243,9 @@ def crack_with_hashcat(
         return None
     except PermissionError as e:
         colored_log("warning",
-                    "Hashcat blocked by Windows Defender. "
-                    "Add an exception for the 'bin/' folder or disable Real-time protection.")
-        log_error("Hashcat blocked by system (PermissionError)", e)
+                    "Hashcat execution blocked. "
+                    "Add an exception for the 'bin/' folder in your security software.")
+        log_error("Hashcat execution blocked (PermissionError)", e)
         return None
     except KeyboardInterrupt:
         if proc:
