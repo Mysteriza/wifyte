@@ -4,6 +4,14 @@
 
 # Wifyte — WiFi Handshake Capture & Cracking Tool
 
+> ## ⚠️ Consider [wifit3](https://github.com/derv82/wifit3) instead
+>
+> The community already has a far more mature, actively maintained tool:
+> **[wifit3](https://github.com/derv82/wifit3)** — the successor to the original Wifite.
+> It is battle-tested, supports many more attack modes, WPS/PMKID attacks, and is the tool most
+> people should reach for first. **Try wifit3 first — it is objectively better than this
+> project.** This repo exists mainly as a learning exercise and a Windows-friendly cracker.
+
 > **If you only need to crack an existing handshake (no capture), consider the simpler companion tool:
 > [handshakeCracker](https://github.com/Mysteriza/handshakeCracker)** — GPU-accelerated WPA/WPA2
 > cracker using hashcat + aircrack-ng, without the capture workflow.
@@ -12,15 +20,16 @@
 cracks passwords. It combines a full capture pipeline (scan, deauth, capture) with dual-backend
 cracking — **hashcat (GPU)** for speed, **aircrack-ng (CPU)** as fallback.
 
-Inspired by [Wifite2](https://github.com/derv82/wifite2), built for modern hardware with a Rich
-terminal UI.
+Inspired by [Wifite2](https://github.com/derv82/wifite2) and [wifit3](https://github.com/derv82/wifit3),
+built for modern hardware with a Rich terminal UI.
 
 ---
 
-## 🔗 Companion Tool
+## 🔗 Related Tools
 
 | Tool | Purpose |
 |------|---------|
+| **[wifit3](https://github.com/derv82/wifit3)** | ⭐ **Recommended** — the mature, feature-complete WiFi attack tool (WPS, PMKID, EVIL-TWIN, and more). Use this instead of wifyte for real engagements. |
 | **[handshakeCracker](https://github.com/Mysteriza/handshakeCracker)** | Crack-only — supply a `.cap` file and wordlist, no WiFi adapter needed. Ideal for Windows users. |
 | **Wifyte (this repo)** | Full pipeline — scan, capture, **and** crack. Requires Linux + monitor-mode adapter for capture. |
 
@@ -43,7 +52,7 @@ terminal UI.
 - **Potfile Lookup** — skips already-cracked passwords via `~/.hashcat/hashcat.potfile`
 
 ### 🧰 Automation & Setup
-- **Auto-Setup** — on first run: installs Python deps, downloads hashcat (`.tar.gz`, no 7-Zip needed), fetches wordlist, detects GPU
+- **Auto-Setup** — on first run: installs Python deps, downloads hashcat (`.7z` + standalone `7zr.exe`, no 7-Zip needed), fetches wordlist, detects GPU
 - **Offline / Windows Mode** — skip capture, crack existing `.cap` / `.pcap` / `.pcapng` files directly
 - **File Logging** — rotating debug logs (`logs/debug_log_*.txt`, keeps last 3)
 - **Auto-Cleanup** — signal handlers restore monitor mode, remove temp files
@@ -218,7 +227,7 @@ wifyte/
 ├── results/               # Cracked passwords (.txt)
 ├── logs/                  # Debug logs (auto-rotating, keeps 3)
 ├── bin/                   # Downloaded binaries (hashcat, aircrack-ng)
-└── deps/                  # Downloaded archives (hashcat .tar.gz, aircrack-ng .zip)
+└── deps/                  # Downloaded archives (hashcat .7z, aircrack-ng .zip)
 ```
 
 ---
@@ -332,8 +341,9 @@ sudo ip link set wlan0 up
 - Or use `--hashcat` to skip aircrack-ng entirely
 
 **Problem**: hashcat .7z extraction fails (no 7-Zip)
-- The program now downloads `.tar.gz` by default, extracted with Python's built-in `tarfile` — no 7-Zip required
-- If the `.tar.gz` download fails, it falls back to `.7z` (still requires 7-Zip for that path)
+- On Windows the program auto-downloads the standalone `7zr.exe` (~300 KB) from 7-zip.org — no 7-Zip install needed
+- On Linux/macOS it uses the system `7z` (install with `sudo apt install p7zip-full`)
+- If extraction still fails, check `logs/debug_log_*.txt` for the exact error
 
 ---
 
@@ -345,6 +355,7 @@ Contributions, issues, and feature requests are welcome. Feel free to open an is
 
 ## 🙏 Acknowledgements
 
+- [wifit3](https://github.com/derv82/wifit3) — the recommended, mature successor to Wifite
 - [Wifite2](https://github.com/derv82/wifite2) — original inspiration
 - [hashcat](https://hashcat.net/hashcat/) — GPU-accelerated password recovery
 - [aircrack-ng](https://www.aircrack-ng.org/) — de facto WiFi security tools

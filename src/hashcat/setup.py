@@ -39,16 +39,20 @@ _SEVEN_ZIP_EXE: str | None = None          # path to 7z(r) for extraction
 # ── Discovery ──────────────────────────────────────────────────────────
 
 def get_hashcat_path() -> str | None:
-    """Return the cached path to the hashcat binary, or None."""
-    return _hashcat_path
+    """Return the path to the hashcat binary (cached, else PATH), or None."""
+    global _hashcat_path
+    if _hashcat_path and os.path.isfile(_hashcat_path):
+        return _hashcat_path
+    found = shutil.which("hashcat")
+    if found:
+        _hashcat_path = found
+        return found
+    return None
 
 
 def is_hashcat_available() -> bool:
     """Check whether hashcat is currently available (cached or on PATH)."""
-    if _hashcat_path and os.path.isfile(_hashcat_path):
-        return True
-    found = shutil.which("hashcat")
-    return found is not None
+    return get_hashcat_path() is not None
 
 
 # ── 7z extraction (standalone 7zr.exe on Windows) ──────────────────────
@@ -229,7 +233,8 @@ def warmup_hashcat_kernel(hc22000_path: str | None = None) -> bool:
         log_debug("Hashcat kernel cache already warm.")
         return True
 
-    if not is_hashcat_available():
+    hc_bin = get_hashcat_path()
+    if not hc_bin:
         colored_log("warning", "Hashcat not available — skipping kernel warm-up.")
         return False
 
@@ -250,10 +255,10 @@ def warmup_hashcat_kernel(hc22000_path: str | None = None) -> bool:
             log_debug("No hc22000 available for kernel warm-up.")
             return False
 
-    hc_dir = os.path.dirname(_hashcat_path)
+    hc_dir = os.path.dirname(hc_bin)
 
     cmd = [
-        _hashcat_path,
+        hc_bin,
         "-m", "22000",
         "-a", "0",
         "--status", "--status-timer=1",
