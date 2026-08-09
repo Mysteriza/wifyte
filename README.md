@@ -4,12 +4,12 @@
 
 # Wifyte — WiFi Handshake Capture & Cracking Tool
 
-> ## ⚠️ Consider [wifite3](https://github.com/derv82/wifit3) instead
+> ## ⚠️ Consider [wifit3](https://github.com/derv82/wifit3) instead
 >
 > The community already has a far more mature, actively maintained tool:
-> **[wifite3](https://github.com/derv82/wifit3)** — the successor to the original Wifite.
+> **[wifit3](https://github.com/derv82/wifit3)** — the successor to the original Wifite.
 > It is battle-tested, supports many more attack modes, WPS/PMKID attacks, and is the tool most
-> people should reach for first. **Try wifite3 first — it is objectively better than this
+> people should reach for first. **Try wifit3 first — it is objectively better than this
 > project.** This repo exists mainly as a learning exercise and a Windows-friendly cracker.
 
 > **If you only need to crack an existing handshake (no capture), consider the simpler companion tool:
@@ -20,7 +20,7 @@
 cracks passwords. It combines a full capture pipeline (scan, deauth, capture) with dual-backend
 cracking — **hashcat (GPU)** for speed, **aircrack-ng (CPU)** as fallback.
 
-Inspired by [Wifite2](https://github.com/derv82/wifite2) and [wifite3](https://github.com/derv82/wifit3),
+Inspired by [Wifite2](https://github.com/derv82/wifite2) and [wifit3](https://github.com/derv82/wifit3),
 built for modern hardware with a Rich terminal UI.
 
 ---
@@ -29,7 +29,7 @@ built for modern hardware with a Rich terminal UI.
 
 | Tool | Purpose |
 |------|---------|
-| **[wifite3](https://github.com/derv82/wifit3)** | ⭐ **Recommended** — the mature, feature-complete WiFi attack tool (WPS, PMKID, EVIL-TWIN, and more). Use this instead of wifyte for real engagements. |
+| **[wifit3](https://github.com/derv82/wifit3)** | ⭐ **Recommended** — the mature, feature-complete WiFi attack tool (WPS, PMKID, EVIL-TWIN, and more). Use this instead of wifyte for real engagements. |
 | **[handshakeCracker](https://github.com/Mysteriza/handshakeCracker)** | Crack-only — supply a `.cap` file and wordlist, no WiFi adapter needed. Ideal for Windows users. |
 | **Wifyte (this repo)** | Full pipeline — scan, capture, **and** crack. Requires Linux + monitor-mode adapter for capture. |
 
@@ -355,7 +355,7 @@ Contributions, issues, and feature requests are welcome. Feel free to open an is
 
 ## 🙏 Acknowledgements
 
-- [wifite3](https://github.com/derv82/wifit3) — the recommended, mature successor to Wifite
+- [wifit3](https://github.com/derv82/wifit3) — the recommended, mature successor to Wifite
 - [Wifite2](https://github.com/derv82/wifite2) — original inspiration
 - [hashcat](https://hashcat.net/hashcat/) — GPU-accelerated password recovery
 - [aircrack-ng](https://www.aircrack-ng.org/) — de facto WiFi security tools
