@@ -17,7 +17,7 @@ import subprocess
 from typing import Optional
 
 from src.console import console, colored_log, log_error, log_debug
-from src.config import RESULTS_DIR
+from src.config import RESULTS_DIR, HCOV_DIR
 from src.utils import sanitize_ssid, lower_process_priority
 from src.hashcat.convert import convert_cap_to_hc22000
 from src.hashcat.setup import (
@@ -131,7 +131,10 @@ def crack_with_hashcat(
                 hc22000_path, wordlist_path])
 
     hc_dir = os.path.dirname(hashcat_bin)
-    potfile = os.path.join(hc_dir, "hashcat.potfile")
+
+    # Potfile in HCOV_DIR (always writable — never in /usr/bin/)
+    os.makedirs(HCOV_DIR, exist_ok=True)
+    potfile = os.path.join(HCOV_DIR, "hashcat.potfile")
 
     # ── Fresh potfile every run ──────────────────────────────────
     # Wipe any leftover potfile so we can detect new entries
@@ -225,7 +228,8 @@ def crack_with_hashcat(
         proc.wait()
 
         elapsed = time.time() - start_time
-        log_debug(f"Hashcat finished in {elapsed:.1f}s, rc={proc.returncode}")
+        rc = proc.returncode
+        log_debug(f"Hashcat finished in {elapsed:.1f}s, rc={rc}")
 
         # Check potfile for new entries
         password = _check_new_potfile_entry(potfile, potfile_before)
@@ -239,10 +243,24 @@ def crack_with_hashcat(
             console.print(f"  - Method: hashcat (GPU)", style="green")
             return password
 
-        # Exhausted? (all candidates tested)
         combined = "\n".join(hashcat_output)
+
+        # Non-zero exit code = hashcat error (e.g. 252 = potfile/backend issue)
+        if rc not in (0, 1):
+            # Show the last meaningful lines from hashcat to diagnose
+            tail = [l for l in hashcat_output if l.strip()][-6:]
+            log_error(
+                f"Hashcat exited with code {rc}. "
+                f"Output tail: {' | '.join(tail)}"
+            )
+            colored_log("warning",
+                        f"Hashcat failed (exit code {rc}). "
+                        "Check the debug log for details.")
+            return None
+
+        # Exhausted? (all candidates tested)
         if "Exhausted" in combined or "All hashes" in combined:
-            console.print(f"  Wordlist exhausted — password not found.")
+            colored_log("warning", "Wordlist exhausted — password not in list.")
             return HASHCAT_EXHAUSTED
 
         console.print(f"  Hashcat did not find the password.")
